@@ -657,13 +657,16 @@ button {
 .tabs {
 	display: flex;
 	gap: 4px;
-	border-bottom: 1px solid var(--border);
+	/* Drawn as an inset shadow (not a border) so the active tab's 2px underline
+	   can cover it without a negative margin, which would overflow the box
+	   vertically and show a scrollbar alongside overflow-x: auto. */
+	box-shadow: inset 0 -1px 0 var(--border);
 	margin-bottom: 20px;
 	overflow-x: auto;
+	overflow-y: hidden;
 }
 .tab {
 	padding: 8px 12px;
-	margin-bottom: -1px;
 	border-bottom: 2px solid transparent;
 	color: var(--text-2);
 	text-decoration: none;
