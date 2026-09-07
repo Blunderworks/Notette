@@ -2,7 +2,7 @@
 
 This file contains instructions specific to individual features or sections of the app. Read only the section(s) relevant to the current task — do not read this file in full unless doing a broad refactor. Search it by section heading or keyword as needed.
 
-For rules that apply to every task, see [README.md](README.md) — that file must always be read in full first.
+For rules that apply to every task, see [AGENTS.md](AGENTS.md) — that file must always be read in full first.
 
 ## How to use this file
 
