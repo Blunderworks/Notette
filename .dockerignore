@@ -1,0 +1,11 @@
+node_modules
+build
+.svelte-kit
+.widget-dist
+data
+coverage
+.env
+.env.*
+.git
+.github
+*.log

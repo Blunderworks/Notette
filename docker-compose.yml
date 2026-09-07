@@ -1,0 +1,42 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-notette}
+      POSTGRES_USER: ${POSTGRES_USER:-notette}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - notette-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-notette} -d ${POSTGRES_DB:-notette}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  app:
+    image: ghcr.io/blunderworks/notette:${NOTETTE_IMAGE_TAG:-latest}
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-notette}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-notette}
+      NOTETTE_URL: ${NOTETTE_URL:-http://localhost:3000}
+      NOTETTE_ADMIN_EMAIL: ${NOTETTE_ADMIN_EMAIL:-}
+      NOTETTE_ADMIN_PASSWORD: ${NOTETTE_ADMIN_PASSWORD:-}
+      NOTETTE_ADMIN_NAME: ${NOTETTE_ADMIN_NAME:-Admin}
+      NOTETTE_MAX_SCREENSHOT_BYTES: ${NOTETTE_MAX_SCREENSHOT_BYTES:-8388608}
+      NOTETTE_SESSION_DAYS: ${NOTETTE_SESSION_DAYS:-30}
+      NOTETTE_AUTO_MIGRATE: ${NOTETTE_AUTO_MIGRATE:-true}
+      ADDRESS_HEADER: ${ADDRESS_HEADER:-}
+      XFF_DEPTH: ${XFF_DEPTH:-1}
+    ports:
+      - "${NOTETTE_PORT:-3000}:3000"
+    volumes:
+      - notette-uploads:/data/uploads
+
+volumes:
+  notette-db:
+  notette-uploads:

@@ -1,0 +1,676 @@
+import type {
+	FeedbackCreatePayload,
+	FeedbackDetailDto,
+	FeedbackStatus,
+	FeedbackSummaryDto,
+	WidgetConfigDto,
+	WidgetViewerDto
+} from '$lib/shared/types';
+import { ApiClient, NotetteApiError } from './api';
+import type { ResolvedConfig } from './config';
+import { computeSelector, computeXPath, describeElement, elementLabel, pageRect, pinPosition } from './dom';
+import { captureViewport } from './screenshot';
+import { readLocal, readSession, writeLocal, writeSession } from './storage';
+
+export interface ComposerTarget {
+	element: Element | null;
+	label: string;
+	pageX: number;
+	pageY: number;
+	relX: number | null;
+	relY: number | null;
+}
+
+export type AuthStatus = 'idle' | 'waiting' | 'blocked' | 'denied' | 'expired' | 'error';
+
+export interface Toast {
+	id: number;
+	message: string;
+	kind: 'info' | 'success' | 'error';
+}
+
+export interface AuthorIdentity {
+	name: string;
+	email: string;
+}
+
+const FOCUS_SESSION_KEY = 'notette:focus';
+
+function randomId(): string {
+	if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+	// RFC 4122 v4 fallback.
+	const bytes = new Uint8Array(16);
+	crypto.getRandomValues(bytes);
+	bytes[6] = (bytes[6] & 0x0f) | 0x40;
+	bytes[8] = (bytes[8] & 0x3f) | 0x80;
+	const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+	return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function randomSecret(): string {
+	const bytes = new Uint8Array(32);
+	crypto.getRandomValues(bytes);
+	return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Owns all widget state and side effects. Components read `ui` (a reactive
+ * $state object) and call methods on the controller.
+ */
+export class WidgetController {
+	readonly api: ApiClient;
+	private token: string | null;
+	private disposed = false;
+	private authAbort: AbortController | null = null;
+	private mutationObserver: MutationObserver | null = null;
+	private toastTimer: ReturnType<typeof setTimeout> | null = null;
+	private toastSeq = 0;
+	private pendingFocusId: string | null = null;
+	private pathCheckHandle: number | null = null;
+
+	ui = $state({
+		ready: false,
+		fatalError: null as string | null,
+		project: null as WidgetConfigDto['project'] | null,
+		dashboardUrl: '',
+		viewer: null as WidgetViewerDto | null,
+		expanded: false,
+		picking: false,
+		pinsVisible: true,
+		panelOpen: false,
+		composer: null as ComposerTarget | null,
+		selectedId: null as string | null,
+		detail: null as FeedbackDetailDto | null,
+		detailLoading: false,
+		pageItems: [] as FeedbackSummaryDto[],
+		pageLoading: false,
+		currentPath: typeof location !== 'undefined' ? location.pathname : '/',
+		auth: { status: 'idle' as AuthStatus, url: '', message: '' },
+		toast: null as Toast | null,
+		/** Pin that should draw attention (recently focused). */
+		highlightId: null as string | null,
+		/** Ticks whenever pins need to recompute their positions. */
+		layoutTick: 0
+	});
+
+	constructor(
+		readonly config: ResolvedConfig,
+		readonly host: HTMLElement
+	) {
+		this.token = readLocal<string | null>(this.storageKey('token'), null);
+		this.api = new ApiClient(config.host, config.key, () => this.token);
+		this.ui.pinsVisible = readLocal<boolean>(this.storageKey('pins'), true);
+		this.ui.expanded = config.open;
+	}
+
+	private storageKey(name: string): string {
+		return `notette:${this.config.key}:${name}`;
+	}
+
+	// ---------------------------------------------------------------------
+	// Lifecycle
+	// ---------------------------------------------------------------------
+
+	async start(): Promise<void> {
+		this.installPathTracking();
+		this.readFocusRequest();
+		await this.loadConfig();
+		if (this.disposed || this.ui.fatalError) return;
+		this.ui.ready = true;
+		await this.loadPageItems();
+		if (this.pendingFocusId) this.ui.expanded = true;
+		this.applyPendingFocus();
+	}
+
+	destroy(): void {
+		this.disposed = true;
+		this.authAbort?.abort();
+		this.mutationObserver?.disconnect();
+		if (this.pathCheckHandle !== null) window.clearInterval(this.pathCheckHandle);
+		window.removeEventListener('popstate', this.onLocationMaybeChanged);
+		window.removeEventListener('hashchange', this.onLocationMaybeChanged);
+		if (this.toastTimer) clearTimeout(this.toastTimer);
+	}
+
+	private async loadConfig(): Promise<void> {
+		try {
+			const config = await this.api.getConfig();
+			this.ui.project = config.project;
+			this.ui.dashboardUrl = config.dashboardUrl;
+			this.ui.viewer = config.viewer;
+			if (this.token && !config.viewer) {
+				// Token expired or revoked.
+				this.setToken(null);
+			}
+		} catch (err) {
+			const message =
+				err instanceof NotetteApiError
+					? err.code === 'origin_not_allowed'
+						? `This site's origin is not in the project's allowed origins.`
+						: err.code === 'unknown_project'
+							? 'Unknown project key.'
+							: err.message
+					: 'Could not reach the Notette server.';
+			this.ui.fatalError = message;
+			console.error('[notette] Widget disabled:', message);
+		}
+	}
+
+	// ---------------------------------------------------------------------
+	// Location tracking (SPA-aware without touching history APIs)
+	// ---------------------------------------------------------------------
+
+	private onLocationMaybeChanged = (): void => {
+		const path = location.pathname;
+		if (path !== this.ui.currentPath) {
+			this.ui.currentPath = path;
+			this.ui.selectedId = null;
+			this.ui.detail = null;
+			this.ui.composer = null;
+			void this.loadPageItems();
+		}
+		this.ui.layoutTick += 1;
+	};
+
+	private installPathTracking(): void {
+		window.addEventListener('popstate', this.onLocationMaybeChanged);
+		window.addEventListener('hashchange', this.onLocationMaybeChanged);
+		let scheduled = false;
+		this.mutationObserver = new MutationObserver(() => {
+			if (scheduled) return;
+			scheduled = true;
+			window.setTimeout(() => {
+				scheduled = false;
+				this.onLocationMaybeChanged();
+			}, 250);
+		});
+		this.mutationObserver.observe(document.documentElement, {
+			childList: true,
+			subtree: true,
+			attributes: true,
+			attributeFilter: ['class', 'style', 'hidden', 'open']
+		});
+		// Safety net for pushState-driven navigations that do not mutate the DOM immediately.
+		this.pathCheckHandle = window.setInterval(() => {
+			if (location.pathname !== this.ui.currentPath) this.onLocationMaybeChanged();
+		}, 1000);
+	}
+
+	// ---------------------------------------------------------------------
+	// Data
+	// ---------------------------------------------------------------------
+
+	get canSeeFeedback(): boolean {
+		return !!this.ui.viewer || !!this.ui.project?.publicFeedbackVisible;
+	}
+
+	get canReply(): boolean {
+		return !!this.ui.viewer || (!!this.ui.project?.reviewerRepliesEnabled && this.canSeeFeedback);
+	}
+
+	get isAdmin(): boolean {
+		return !!this.ui.viewer;
+	}
+
+	async loadPageItems(): Promise<void> {
+		if (!this.canSeeFeedback) {
+			this.ui.pageItems = [];
+			return;
+		}
+		this.ui.pageLoading = true;
+		const path = this.ui.currentPath;
+		try {
+			const result = await this.api.listPage(path);
+			if (this.disposed || path !== this.ui.currentPath) return;
+			this.ui.pageItems = result.items;
+			this.ui.layoutTick += 1;
+		} catch (err) {
+			console.warn('[notette] Could not load feedback for this page', err);
+		} finally {
+			this.ui.pageLoading = false;
+		}
+	}
+
+	async refreshItem(id: string): Promise<void> {
+		try {
+			const detail = await this.api.getDetail(id);
+			this.upsertPageItem(detail);
+			if (this.ui.selectedId === id) this.ui.detail = detail;
+		} catch {
+			/* ignore */
+		}
+	}
+
+	private upsertPageItem(item: FeedbackSummaryDto): void {
+		const index = this.ui.pageItems.findIndex((i) => i.id === item.id);
+		const summary = this.toSummary(item);
+		if (item.path !== this.ui.currentPath) {
+			if (index >= 0) this.ui.pageItems.splice(index, 1);
+			return;
+		}
+		if (index >= 0) this.ui.pageItems[index] = summary;
+		else this.ui.pageItems = [summary, ...this.ui.pageItems];
+		this.ui.layoutTick += 1;
+	}
+
+	private toSummary(item: FeedbackSummaryDto): FeedbackSummaryDto {
+		// Strip detail-only fields so page items stay lightweight and uniform.
+		const { comments: _c, screenshotUrl: _s, elementAttributes: _a, metadata: _m, userAgent: _u, devicePixelRatio: _d, ...rest } =
+			item as FeedbackDetailDto;
+		return rest;
+	}
+
+	// ---------------------------------------------------------------------
+	// UI state transitions
+	// ---------------------------------------------------------------------
+
+	expand(): void {
+		this.ui.expanded = true;
+	}
+
+	collapse(): void {
+		this.ui.expanded = false;
+		this.ui.picking = false;
+		this.ui.panelOpen = false;
+		this.ui.composer = null;
+		this.closeThread();
+	}
+
+	toggleExpanded(): void {
+		if (this.ui.expanded) this.collapse();
+		else this.expand();
+	}
+
+	startPicking(): void {
+		this.ui.expanded = true;
+		this.ui.composer = null;
+		this.closeThread();
+		this.ui.panelOpen = false;
+		this.ui.picking = true;
+	}
+
+	stopPicking(): void {
+		this.ui.picking = false;
+	}
+
+	togglePicking(): void {
+		if (this.ui.picking) this.stopPicking();
+		else this.startPicking();
+	}
+
+	togglePins(): void {
+		this.ui.pinsVisible = !this.ui.pinsVisible;
+		writeLocal(this.storageKey('pins'), this.ui.pinsVisible);
+		if (!this.ui.pinsVisible) this.closeThread();
+	}
+
+	togglePanel(): void {
+		this.ui.panelOpen = !this.ui.panelOpen;
+		if (this.ui.panelOpen) {
+			this.ui.picking = false;
+			this.ui.composer = null;
+		}
+	}
+
+	closePanel(): void {
+		this.ui.panelOpen = false;
+	}
+
+	beginCompose(element: Element | null, clientX: number, clientY: number): void {
+		const pageX = Math.round(clientX + window.scrollX);
+		const pageY = Math.round(clientY + window.scrollY);
+		let relX: number | null = null;
+		let relY: number | null = null;
+		let label = 'page';
+		const target = element && element !== document.documentElement && element !== document.body ? element : null;
+		if (target) {
+			const r = target.getBoundingClientRect();
+			if (r.width > 0) relX = Math.min(Math.max((clientX - r.left) / r.width, 0), 1);
+			if (r.height > 0) relY = Math.min(Math.max((clientY - r.top) / r.height, 0), 1);
+			label = elementLabel(target);
+		}
+		this.ui.picking = false;
+		this.closeThread();
+		this.ui.composer = { element: target, label, pageX, pageY, relX, relY };
+	}
+
+	cancelCompose(): void {
+		this.ui.composer = null;
+	}
+
+	// ---------------------------------------------------------------------
+	// Author identity for reviewers
+	// ---------------------------------------------------------------------
+
+	getAuthor(): AuthorIdentity {
+		const stored = readLocal<Partial<AuthorIdentity>>('notette:author', {});
+		return {
+			name: this.config.user?.name ?? stored.name ?? '',
+			email: this.config.user?.email ?? stored.email ?? ''
+		};
+	}
+
+	rememberAuthor(author: AuthorIdentity): void {
+		writeLocal('notette:author', { name: author.name.trim(), email: author.email.trim() });
+	}
+
+	// ---------------------------------------------------------------------
+	// Feedback actions
+	// ---------------------------------------------------------------------
+
+	async submitFeedback(input: {
+		target: ComposerTarget;
+		body: string;
+		author: AuthorIdentity;
+		screenshot: boolean;
+	}): Promise<FeedbackDetailDto> {
+		const { target } = input;
+		const element = target.element;
+		const payload: FeedbackCreatePayload = {
+			body: input.body.trim(),
+			author: this.isAdmin
+				? undefined
+				: {
+						name: input.author.name.trim() || undefined,
+						email: input.author.email.trim() || undefined
+					},
+			page: {
+				url: location.href,
+				title: document.title || undefined,
+				viewportWidth: window.innerWidth,
+				viewportHeight: window.innerHeight,
+				devicePixelRatio: window.devicePixelRatio || 1,
+				scrollX: Math.round(window.scrollX),
+				scrollY: Math.round(window.scrollY),
+				userAgent: navigator.userAgent
+			},
+			click: { x: target.pageX, y: target.pageY },
+			deployment: this.config.deployment,
+			metadata: this.config.metadata
+		};
+		if (element && element.isConnected) {
+			const description = describeElement(element);
+			payload.element = {
+				selector: computeSelector(element) ?? undefined,
+				xpath: computeXPath(element),
+				tag: description.tag,
+				text: description.text,
+				attributes: description.attributes,
+				rect: pageRect(element),
+				relX: target.relX ?? undefined,
+				relY: target.relY ?? undefined
+			};
+		}
+
+		if (!this.isAdmin) this.rememberAuthor(input.author);
+
+		// Screenshot capture happens before submission but never blocks it.
+		const wantScreenshot = input.screenshot && !!this.ui.project?.screenshotsEnabled;
+		const shot = wantScreenshot
+			? await captureViewport({ exclude: this.host, marker: { x: target.pageX, y: target.pageY } })
+			: null;
+
+		const created = await this.api.create(payload);
+		this.ui.composer = null;
+		this.upsertPageItem(created.item);
+
+		if (wantScreenshot) {
+			if (shot) {
+				try {
+					await this.api.uploadScreenshot(created.item.id, shot.blob, created.uploadToken, shot);
+					created.item.hasScreenshot = true;
+					this.upsertPageItem(created.item);
+				} catch (err) {
+					console.warn('[notette] Screenshot upload failed', err);
+					this.toast(`Feedback #${created.item.number} sent (screenshot upload failed)`, 'info');
+					return created.item;
+				}
+			} else {
+				this.toast(`Feedback #${created.item.number} sent (screenshot unavailable)`, 'info');
+				return created.item;
+			}
+		}
+		this.toast(`Feedback #${created.item.number} sent`, 'success');
+		return created.item;
+	}
+
+	async openThread(id: string): Promise<void> {
+		this.ui.picking = false;
+		this.ui.composer = null;
+		this.ui.selectedId = id;
+		this.ui.detail = null;
+		this.ui.detailLoading = true;
+		try {
+			const detail = await this.api.getDetail(id);
+			if (this.ui.selectedId !== id) return;
+			this.ui.detail = detail;
+			this.upsertPageItem(detail);
+		} catch (err) {
+			this.toast(err instanceof NotetteApiError ? err.message : 'Could not load this thread', 'error');
+			this.ui.selectedId = null;
+		} finally {
+			this.ui.detailLoading = false;
+		}
+	}
+
+	closeThread(): void {
+		this.ui.selectedId = null;
+		this.ui.detail = null;
+		this.ui.highlightId = null;
+	}
+
+	async reply(id: string, body: string, author: AuthorIdentity): Promise<void> {
+		const comment = await this.api.addComment(
+			id,
+			body.trim(),
+			this.isAdmin ? undefined : { name: author.name.trim() || undefined, email: author.email.trim() || undefined }
+		);
+		if (!this.isAdmin) this.rememberAuthor(author);
+		if (this.ui.detail?.id === id) {
+			this.ui.detail.comments = [...this.ui.detail.comments, comment];
+			this.ui.detail.commentCount = this.ui.detail.comments.length;
+		}
+		const item = this.ui.pageItems.find((i) => i.id === id);
+		if (item) item.commentCount += 1;
+	}
+
+	async setStatus(id: string, status: FeedbackStatus): Promise<void> {
+		const detail = await this.api.setStatus(id, status);
+		if (this.ui.selectedId === id) this.ui.detail = detail;
+		this.upsertPageItem(detail);
+		this.toast(status === 'resolved' ? `#${detail.number} resolved` : `#${detail.number} reopened`, 'success');
+	}
+
+	async remove(id: string): Promise<void> {
+		await this.api.remove(id);
+		this.ui.pageItems = this.ui.pageItems.filter((i) => i.id !== id);
+		if (this.ui.selectedId === id) this.closeThread();
+		this.ui.layoutTick += 1;
+		this.toast('Feedback deleted', 'success');
+	}
+
+	async loadScreenshot(id: string): Promise<string | null> {
+		try {
+			const blob = await this.api.getScreenshot(id);
+			return URL.createObjectURL(blob);
+		} catch {
+			return null;
+		}
+	}
+
+	// ---------------------------------------------------------------------
+	// Focus / navigation between items
+	// ---------------------------------------------------------------------
+
+	private readFocusRequest(): void {
+		let id: string | null = null;
+		try {
+			id = new URL(location.href).searchParams.get('notette');
+		} catch {
+			id = null;
+		}
+		const stored = readSession(FOCUS_SESSION_KEY);
+		if (stored) writeSession(FOCUS_SESSION_KEY, null);
+		this.pendingFocusId = id || stored || null;
+	}
+
+	private applyPendingFocus(): void {
+		const id = this.pendingFocusId;
+		if (!id) return;
+		this.pendingFocusId = null;
+		if (this.ui.pageItems.some((i) => i.id === id)) {
+			void this.focusItem(id);
+		} else if (this.canSeeFeedback) {
+			// Item may belong to another page or be unknown; try opening it directly.
+			void this.openThread(id);
+		}
+	}
+
+	/** Navigates to an item's page if needed, then scrolls to and opens it. */
+	async focusItem(id: string, itemHint?: FeedbackSummaryDto): Promise<void> {
+		const local = this.ui.pageItems.find((i) => i.id === id);
+		const item = local ?? itemHint;
+		if (!item) {
+			await this.openThread(id);
+			return;
+		}
+		if (item.path !== this.ui.currentPath) {
+			this.navigateTo(item);
+			return;
+		}
+		this.ui.expanded = true;
+		this.ui.panelOpen = false;
+		if (!this.ui.pinsVisible) this.togglePins();
+		const position = pinPosition(item);
+		if (position?.element) {
+			position.element.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+		} else if (item.clickY !== null) {
+			window.scrollTo({ top: Math.max(0, item.clickY - window.innerHeight / 2), behavior: 'smooth' });
+		}
+		this.ui.highlightId = id;
+		window.setTimeout(() => {
+			if (this.ui.highlightId === id) this.ui.highlightId = null;
+		}, 2500);
+		await this.openThread(id);
+	}
+
+	private navigateTo(item: FeedbackSummaryDto): void {
+		writeSession(FOCUS_SESSION_KEY, item.id);
+		let target: string;
+		try {
+			const url = new URL(item.url);
+			target = url.origin === location.origin ? url.toString() : `${location.origin}${url.pathname}${url.search}`;
+		} catch {
+			target = item.path;
+		}
+		location.assign(target);
+	}
+
+	// ---------------------------------------------------------------------
+	// Admin authentication (popup + polling, no third-party cookies)
+	// ---------------------------------------------------------------------
+
+	private setToken(token: string | null): void {
+		this.token = token;
+		writeLocal(this.storageKey('token'), token);
+	}
+
+	signIn(): void {
+		if (this.ui.auth.status === 'waiting') return;
+		const id = randomId();
+		const secret = randomSecret();
+		const url = `${this.config.host}/widget/authorize?request=${encodeURIComponent(id)}`;
+		// Open synchronously within the user gesture so popup blockers allow it.
+		let popup: Window | null = null;
+		try {
+			popup = window.open(url, 'notette-authorize', 'popup=yes,width=480,height=640');
+		} catch {
+			popup = null;
+		}
+		this.ui.auth = { status: popup ? 'waiting' : 'blocked', url, message: '' };
+		void this.runAuthFlow(id, secret, popup);
+	}
+
+	private async runAuthFlow(id: string, secret: string, popup: Window | null): Promise<void> {
+		this.authAbort?.abort();
+		const abort = new AbortController();
+		this.authAbort = abort;
+		try {
+			await this.api.createAuthRequest(id, secret);
+		} catch (err) {
+			this.ui.auth = {
+				status: 'error',
+				url: '',
+				message: err instanceof NotetteApiError ? err.message : 'Could not start sign-in'
+			};
+			popup?.close();
+			return;
+		}
+		const deadline = Date.now() + 10 * 60 * 1000;
+		while (!abort.signal.aborted && Date.now() < deadline) {
+			await new Promise((r) => setTimeout(r, 1500));
+			if (abort.signal.aborted) return;
+			try {
+				const result = await this.api.pollAuthRequest(id, secret, abort.signal);
+				if (result.status === 'approved' && result.token) {
+					this.setToken(result.token);
+					this.ui.viewer = result.viewer ?? null;
+					this.ui.auth = { status: 'idle', url: '', message: '' };
+					try {
+						popup?.close();
+					} catch {
+						/* cross-origin popup may not be closable */
+					}
+					this.toast(`Signed in as ${result.viewer?.name ?? 'admin'}`, 'success');
+					await this.loadPageItems();
+					return;
+				}
+				if (result.status === 'denied' || result.status === 'expired') {
+					this.ui.auth = { status: result.status, url: '', message: '' };
+					return;
+				}
+			} catch (err) {
+				if (err instanceof DOMException && err.name === 'AbortError') return;
+				if (err instanceof NotetteApiError && err.status === 404) {
+					this.ui.auth = { status: 'expired', url: '', message: '' };
+					return;
+				}
+				// Transient errors: keep polling.
+			}
+		}
+		if (!abort.signal.aborted) this.ui.auth = { status: 'expired', url: '', message: '' };
+	}
+
+	cancelSignIn(): void {
+		this.authAbort?.abort();
+		this.authAbort = null;
+		this.ui.auth = { status: 'idle', url: '', message: '' };
+	}
+
+	async signOut(): Promise<void> {
+		try {
+			await this.api.logout();
+		} catch {
+			/* token may already be invalid */
+		}
+		this.setToken(null);
+		this.ui.viewer = null;
+		this.ui.panelOpen = false;
+		this.closeThread();
+		this.toast('Signed out', 'info');
+		await this.loadPageItems();
+	}
+
+	// ---------------------------------------------------------------------
+	// Toasts
+	// ---------------------------------------------------------------------
+
+	toast(message: string, kind: Toast['kind'] = 'info'): void {
+		this.toastSeq += 1;
+		this.ui.toast = { id: this.toastSeq, message, kind };
+		if (this.toastTimer) clearTimeout(this.toastTimer);
+		this.toastTimer = setTimeout(() => {
+			this.ui.toast = null;
+		}, 3500);
+	}
+}

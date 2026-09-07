@@ -1,0 +1,52 @@
+{
+  "name": "notette",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-hosted, framework-agnostic preview feedback widget and dashboard.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@10.15.0",
+  "scripts": {
+    "dev": "pnpm run build:widget && vite dev",
+    "dev:widget": "vite build --config vite.widget.config.ts --watch",
+    "build": "pnpm run build:widget && vite build",
+    "build:widget": "vite build --config vite.widget.config.ts",
+    "preview": "vite preview",
+    "start": "node build",
+    "prepare": "svelte-kit sync || echo ''",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio",
+    "admin:reset-password": "node scripts/reset-password.mjs"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.2",
+    "postgres": "^3.4.9",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@sveltejs/adapter-node": "^5.5.7",
+    "@sveltejs/kit": "^2.70.3",
+    "@sveltejs/vite-plugin-svelte": "^6.2.4",
+    "@types/node": "^22.15.0",
+    "drizzle-kit": "^0.31.10",
+    "html2canvas": "^1.4.1",
+    "jsdom": "^26.1.0",
+    "svelte": "^5.57.0",
+    "svelte-check": "^4.7.6",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.6",
+    "vitest": "^3.2.7"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}
