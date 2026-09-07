@@ -12,6 +12,7 @@ const base: FeedbackDetailDto = {
 	pageTitle: 'Settings · Acme',
 	authorName: 'Jane',
 	isAdmin: false,
+	isMember: false,
 	createdAt: '2026-09-07T10:00:00.000Z',
 	updatedAt: '2026-09-07T10:00:00.000Z',
 	resolvedAt: null,
@@ -31,7 +32,9 @@ const base: FeedbackDetailDto = {
 	elementRelX: 0.18,
 	elementRelY: 0.5,
 	deployment: { environment: 'preview', branch: 'feat/billing', commit: 'abc1234' },
-	comments: [{ id: 'c1', body: 'Reproduced on iPhone 13', authorName: 'Dev', isAdmin: true, createdAt: '2026-09-07T11:00:00.000Z' }],
+	comments: [
+		{ id: 'c1', body: 'Reproduced on iPhone 13', authorName: 'Dev', isAdmin: true, isMember: false, createdAt: '2026-09-07T11:00:00.000Z' }
+	],
 	screenshotUrl: 'https://notette.example.com/uploads/u1',
 	elementAttributes: { class: 'primary', type: 'submit' },
 	devicePixelRatio: 2,

@@ -5,6 +5,7 @@ import {
 	jsonb,
 	pgEnum,
 	pgTable,
+	primaryKey,
 	real,
 	text,
 	timestamp,
@@ -13,7 +14,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import type { DeploymentInfo, ElementRect } from '$lib/shared/types';
 
-export const userRole = pgEnum('user_role', ['owner', 'admin']);
+export const userRole = pgEnum('user_role', ['owner', 'admin', 'member']);
 export const sessionKind = pgEnum('session_kind', ['dashboard', 'widget']);
 export const feedbackStatus = pgEnum('feedback_status', ['open', 'resolved']);
 export const authRequestStatus = pgEnum('auth_request_status', ['pending', 'approved', 'denied']);
@@ -49,10 +50,37 @@ export const projects = pgTable(
 		reviewerRepliesEnabled: boolean('reviewer_replies_enabled').notNull().default(true),
 		/** The widget captures a viewport screenshot with each feedback item. */
 		screenshotsEnabled: boolean('screenshots_enabled').notNull().default(true),
+		/**
+		 * Visitors can use the widget without an account. When off, the widget
+		 * requires signing in (or signing up, if open) before anything else.
+		 */
+		anonymousFeedbackAllowed: boolean('anonymous_feedback_allowed').notNull().default(true),
+		/**
+		 * Anyone can create a member account from the widget and any signed-in
+		 * user is added to the project on first access. When off, only members
+		 * added in the dashboard (plus admins) can access the project.
+		 */
+		openSignups: boolean('open_signups').notNull().default(false),
 		feedbackSeq: integer('feedback_seq').notNull().default(0),
 		...timestamps
 	},
 	(t) => [uniqueIndex('projects_client_key_idx').on(t.clientKey)]
+);
+
+/** Members (role `member`) only have access to the projects listed here. */
+export const projectMembers = pgTable(
+	'project_members',
+	{
+		projectId: uuid('project_id')
+			.notNull()
+			.references(() => projects.id, { onDelete: 'cascade' }),
+		userId: uuid('user_id')
+			.notNull()
+			.references(() => users.id, { onDelete: 'cascade' }),
+		addedById: uuid('added_by_id').references(() => users.id, { onDelete: 'set null' }),
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+	},
+	(t) => [primaryKey({ columns: [t.projectId, t.userId] }), index('project_members_user_idx').on(t.userId)]
 );
 
 export const sessions = pgTable(
@@ -110,7 +138,7 @@ export const feedback = pgTable(
 		body: text('body').notNull(),
 		authorName: text('author_name'),
 		authorEmail: text('author_email'),
-		/** Set when the author was an authenticated admin. */
+		/** Set when the author was signed in (admin or member). */
 		userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
 
 		url: text('url').notNull(),
@@ -191,6 +219,7 @@ export const uploads = pgTable(
 
 export type User = typeof users.$inferSelect;
 export type Project = typeof projects.$inferSelect;
+export type ProjectMember = typeof projectMembers.$inferSelect;
 export type Session = typeof sessions.$inferSelect;
 export type AuthRequest = typeof authRequests.$inferSelect;
 export type Feedback = typeof feedback.$inferSelect;

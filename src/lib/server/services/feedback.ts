@@ -5,21 +5,24 @@ import {
 	feedback,
 	projects,
 	uploads,
-	type Comment,
+	users,
 	type Feedback,
 	type Project,
 	type Upload,
 	type User
 } from '$lib/server/db/schema';
 import type { FeedbackCreateInput } from '$lib/server/validation';
+import { isAdminRole, type UserRole } from '$lib/shared/roles';
 import type { FeedbackDetailDto, FeedbackStatus, FeedbackSummaryDto } from '$lib/shared/types';
-import { listComments, toCommentDto } from './comments';
+import { listComments, toCommentDto, type CommentRow } from './comments';
 import { deleteFilesForFeedback, getScreenshotForFeedback } from './uploads';
 
 export interface FeedbackRow extends Feedback {
 	commentCount: number;
 	screenshotId: string | null;
 	projectName: string;
+	/** Current role of the signed-in author, null for anonymous reviewers or deleted accounts. */
+	authorRole: UserRole | null;
 }
 
 export interface FeedbackFilters {
@@ -72,7 +75,8 @@ function selectColumns() {
 		updatedAt: feedback.updatedAt,
 		commentCount,
 		screenshotId,
-		projectName: projects.name
+		projectName: projects.name,
+		authorRole: users.role
 	};
 }
 
@@ -113,6 +117,7 @@ export async function listFeedback(filters: FeedbackFilters): Promise<{ items: F
 		.select(selectColumns())
 		.from(feedback)
 		.innerJoin(projects, eq(projects.id, feedback.projectId))
+		.leftJoin(users, eq(users.id, feedback.userId))
 		.where(where)
 		.orderBy(desc(feedback.createdAt))
 		.limit(limit)
@@ -128,6 +133,7 @@ export async function getFeedback(id: string): Promise<FeedbackRow | null> {
 		.select(selectColumns())
 		.from(feedback)
 		.innerJoin(projects, eq(projects.id, feedback.projectId))
+		.leftJoin(users, eq(users.id, feedback.userId))
 		.where(eq(feedback.id, id))
 		.limit(1);
 	return row ?? null;
@@ -135,7 +141,7 @@ export async function getFeedback(id: string): Promise<FeedbackRow | null> {
 
 export interface FeedbackThread {
 	item: FeedbackRow;
-	comments: Comment[];
+	comments: CommentRow[];
 	screenshot: Upload | null;
 }
 
@@ -152,6 +158,7 @@ export async function createFeedback(
 	ctx: { user?: User | null; userAgent?: string | null }
 ): Promise<Feedback> {
 	const pageUrl = new URL(input.page.url);
+	// Signed-in users (admins and members) always post under their account identity.
 	const author = ctx.user
 		? { name: ctx.user.name, email: ctx.user.email, userId: ctx.user.id }
 		: { name: input.author?.name ?? null, email: input.author?.email ?? null, userId: null };
@@ -230,7 +237,8 @@ export function toSummaryDto(row: FeedbackRow): FeedbackSummaryDto {
 		path: row.path,
 		pageTitle: row.pageTitle,
 		authorName: row.authorName,
-		isAdmin: row.userId !== null,
+		isAdmin: isAdminRole(row.authorRole),
+		isMember: row.authorRole === 'member',
 		createdAt: row.createdAt.toISOString(),
 		updatedAt: row.updatedAt.toISOString(),
 		resolvedAt: row.resolvedAt ? row.resolvedAt.toISOString() : null,

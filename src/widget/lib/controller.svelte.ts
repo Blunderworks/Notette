@@ -3,7 +3,10 @@ import type {
 	FeedbackDetailDto,
 	FeedbackStatus,
 	FeedbackSummaryDto,
+	WidgetAuthResultDto,
 	WidgetConfigDto,
+	WidgetLoginPayload,
+	WidgetSignupPayload,
 	WidgetViewerDto
 } from '$lib/shared/types';
 import { ApiClient, NotetteApiError } from './api';
@@ -21,7 +24,12 @@ export interface ComposerTarget {
 	relY: number | null;
 }
 
-export type AuthStatus = 'idle' | 'waiting' | 'blocked' | 'denied' | 'expired' | 'error';
+/**
+ * `form` shows the inline sign-in/sign-up dialog; the remaining non-idle
+ * states belong to the dashboard-approval (popup + polling) flow.
+ */
+export type AuthStatus = 'idle' | 'form' | 'waiting' | 'blocked' | 'denied' | 'expired' | 'error';
+export type AuthMode = 'login' | 'signup';
 
 export interface Toast {
 	id: number;
@@ -85,7 +93,9 @@ export class WidgetController {
 		pageItems: [] as FeedbackSummaryDto[],
 		pageLoading: false,
 		currentPath: typeof location !== 'undefined' ? location.pathname : '/',
-		auth: { status: 'idle' as AuthStatus, url: '', message: '' },
+		auth: { status: 'idle' as AuthStatus, mode: 'login' as AuthMode, url: '', message: '' },
+		/** Cloudflare Turnstile site key when the server has bot protection configured. */
+		turnstileSiteKey: null as string | null,
 		toast: null as Toast | null,
 		/** Pin that should draw attention (recently focused). */
 		highlightId: null as string | null,
@@ -118,7 +128,11 @@ export class WidgetController {
 		if (this.disposed || this.ui.fatalError) return;
 		this.ui.ready = true;
 		await this.loadPageItems();
-		if (this.pendingFocusId) this.ui.expanded = true;
+		if (this.pendingFocusId) {
+			// Deep links open the widget; on sign-in-only projects that means the sign-in dialog.
+			if (this.requiresSignIn) this.openSignIn();
+			else this.ui.expanded = true;
+		}
 		this.applyPendingFocus();
 	}
 
@@ -138,6 +152,7 @@ export class WidgetController {
 			this.ui.project = config.project;
 			this.ui.dashboardUrl = config.dashboardUrl;
 			this.ui.viewer = config.viewer;
+			this.ui.turnstileSiteKey = config.turnstileSiteKey;
 			if (this.token && !config.viewer) {
 				// Token expired or revoked.
 				this.setToken(null);
@@ -200,16 +215,33 @@ export class WidgetController {
 	// Data
 	// ---------------------------------------------------------------------
 
+	/** Owners and admins: moderation actions, project-wide browsing, everything visible. */
+	get isAdmin(): boolean {
+		return !!this.ui.viewer?.admin;
+	}
+
+	/** Any signed-in account, including members. */
+	get isSignedIn(): boolean {
+		return !!this.ui.viewer;
+	}
+
+	/** The project disallows anonymous use and nobody is signed in yet. */
+	get requiresSignIn(): boolean {
+		return !!this.ui.project && !this.ui.project.anonymousFeedbackAllowed && !this.ui.viewer;
+	}
+
+	/** Anonymous submissions need a Turnstile token when the server has it configured. */
+	get needsTurnstile(): boolean {
+		return !!this.ui.turnstileSiteKey && !this.ui.viewer;
+	}
+
+	/** Members count as reviewers: only admins bypass `publicFeedbackVisible`. */
 	get canSeeFeedback(): boolean {
-		return !!this.ui.viewer || !!this.ui.project?.publicFeedbackVisible;
+		return this.isAdmin || (!!this.ui.project?.publicFeedbackVisible && !this.requiresSignIn);
 	}
 
 	get canReply(): boolean {
-		return !!this.ui.viewer || (!!this.ui.project?.reviewerRepliesEnabled && this.canSeeFeedback);
-	}
-
-	get isAdmin(): boolean {
-		return !!this.ui.viewer;
+		return this.isAdmin || (!!this.ui.project?.reviewerRepliesEnabled && this.canSeeFeedback);
 	}
 
 	async loadPageItems(): Promise<void> {
@@ -264,7 +296,12 @@ export class WidgetController {
 	// UI state transitions
 	// ---------------------------------------------------------------------
 
+	/** Opens the toolbar, or the sign-in dialog when the project requires an account. */
 	expand(): void {
+		if (this.requiresSignIn) {
+			this.openSignIn();
+			return;
+		}
 		this.ui.expanded = true;
 	}
 
@@ -282,6 +319,10 @@ export class WidgetController {
 	}
 
 	startPicking(): void {
+		if (this.requiresSignIn) {
+			this.openSignIn();
+			return;
+		}
 		this.ui.expanded = true;
 		this.ui.composer = null;
 		this.closeThread();
@@ -305,6 +346,10 @@ export class WidgetController {
 	}
 
 	togglePanel(): void {
+		if (this.requiresSignIn) {
+			this.openSignIn();
+			return;
+		}
 		this.ui.panelOpen = !this.ui.panelOpen;
 		if (this.ui.panelOpen) {
 			this.ui.picking = false;
@@ -363,17 +408,20 @@ export class WidgetController {
 		body: string;
 		author: AuthorIdentity;
 		screenshot: boolean;
+		turnstileToken?: string | null;
 	}): Promise<FeedbackDetailDto> {
 		const { target } = input;
 		const element = target.element;
 		const payload: FeedbackCreatePayload = {
 			body: input.body.trim(),
-			author: this.isAdmin
+			// Signed-in users (admins and members) post under their account; the server ignores author for them.
+			author: this.isSignedIn
 				? undefined
 				: {
 						name: input.author.name.trim() || undefined,
 						email: input.author.email.trim() || undefined
 					},
+			turnstileToken: this.isSignedIn ? undefined : (input.turnstileToken ?? undefined),
 			page: {
 				url: location.href,
 				title: document.title || undefined,
@@ -402,7 +450,7 @@ export class WidgetController {
 			};
 		}
 
-		if (!this.isAdmin) this.rememberAuthor(input.author);
+		if (!this.isSignedIn) this.rememberAuthor(input.author);
 
 		// Screenshot capture happens before submission but never blocks it.
 		const wantScreenshot = input.screenshot && !!this.ui.project?.screenshotsEnabled;
@@ -410,7 +458,13 @@ export class WidgetController {
 			? await captureViewport({ exclude: this.host, marker: { x: target.pageX, y: target.pageY } })
 			: null;
 
-		const created = await this.api.create(payload);
+		let created: Awaited<ReturnType<ApiClient['create']>>;
+		try {
+			created = await this.api.create(payload);
+		} catch (err) {
+			this.handleAuthError(err);
+			throw err;
+		}
 		this.ui.composer = null;
 		this.upsertPageItem(created.item);
 
@@ -459,13 +513,20 @@ export class WidgetController {
 		this.ui.highlightId = null;
 	}
 
-	async reply(id: string, body: string, author: AuthorIdentity): Promise<void> {
-		const comment = await this.api.addComment(
-			id,
-			body.trim(),
-			this.isAdmin ? undefined : { name: author.name.trim() || undefined, email: author.email.trim() || undefined }
-		);
-		if (!this.isAdmin) this.rememberAuthor(author);
+	async reply(id: string, body: string, author: AuthorIdentity, turnstileToken?: string | null): Promise<void> {
+		let comment: Awaited<ReturnType<ApiClient['addComment']>>;
+		try {
+			comment = await this.api.addComment(
+				id,
+				body.trim(),
+				this.isSignedIn ? undefined : { name: author.name.trim() || undefined, email: author.email.trim() || undefined },
+				this.isSignedIn ? undefined : (turnstileToken ?? undefined)
+			);
+		} catch (err) {
+			this.handleAuthError(err);
+			throw err;
+		}
+		if (!this.isSignedIn) this.rememberAuthor(author);
 		if (this.ui.detail?.id === id) {
 			this.ui.detail.comments = [...this.ui.detail.comments, comment];
 			this.ui.detail.commentCount = this.ui.detail.comments.length;
@@ -517,6 +578,8 @@ export class WidgetController {
 	private applyPendingFocus(): void {
 		const id = this.pendingFocusId;
 		if (!id) return;
+		// Keep the request until the user has signed in on sign-in-only projects.
+		if (this.requiresSignIn) return;
 		this.pendingFocusId = null;
 		if (this.ui.pageItems.some((i) => i.id === id)) {
 			void this.focusItem(id);
@@ -528,6 +591,12 @@ export class WidgetController {
 
 	/** Navigates to an item's page if needed, then scrolls to and opens it. */
 	async focusItem(id: string, itemHint?: FeedbackSummaryDto): Promise<void> {
+		if (this.requiresSignIn) {
+			// Remember the request; applyPendingFocus() runs it once the user has signed in.
+			this.pendingFocusId = id;
+			this.openSignIn();
+			return;
+		}
 		const local = this.ui.pageItems.find((i) => i.id === id);
 		const item = local ?? itemHint;
 		if (!item) {
@@ -567,7 +636,9 @@ export class WidgetController {
 	}
 
 	// ---------------------------------------------------------------------
-	// Admin authentication (popup + polling, no third-party cookies)
+	// Authentication: inline sign-in/sign-up (email + password against the
+	// widget API) or approval from the dashboard (popup + polling). Neither
+	// relies on third-party cookies; the bearer token lives in localStorage.
 	// ---------------------------------------------------------------------
 
 	private setToken(token: string | null): void {
@@ -575,7 +646,55 @@ export class WidgetController {
 		writeLocal(this.storageKey('token'), token);
 	}
 
-	signIn(): void {
+	/** Shows the inline sign-in (or sign-up) dialog. */
+	openSignIn(mode: AuthMode = 'login'): void {
+		if (this.ui.auth.status === 'waiting') return;
+		this.authAbort?.abort();
+		this.authAbort = null;
+		const signupAllowed = !!this.ui.project?.openSignups;
+		this.ui.auth = { status: 'form', mode: mode === 'signup' && signupAllowed ? 'signup' : 'login', url: '', message: '' };
+	}
+
+	setAuthMode(mode: AuthMode): void {
+		if (this.ui.auth.status !== 'form') return;
+		if (mode === 'signup' && !this.ui.project?.openSignups) return;
+		this.ui.auth.mode = mode;
+	}
+
+	async signInWithPassword(input: WidgetLoginPayload): Promise<void> {
+		const result = await this.api.login(input);
+		await this.applySignedIn(result, `Signed in as ${result.viewer.name}`);
+	}
+
+	async signUp(input: WidgetSignupPayload): Promise<void> {
+		const result = await this.api.signup(input);
+		await this.applySignedIn(result, `Welcome, ${result.viewer.name}`);
+	}
+
+	private async applySignedIn(result: WidgetAuthResultDto, message: string): Promise<void> {
+		this.setToken(result.token);
+		this.ui.viewer = result.viewer;
+		this.ui.auth = { status: 'idle', mode: 'login', url: '', message: '' };
+		this.toast(message, 'success');
+		this.ui.expanded = true;
+		await this.loadPageItems();
+		this.applyPendingFocus();
+	}
+
+	/**
+	 * Called when a request fails because the session is gone (revoked access,
+	 * expired token, or the project stopped allowing anonymous use).
+	 */
+	private handleAuthError(err: unknown): void {
+		if (!(err instanceof NotetteApiError)) return;
+		if (err.status !== 401) return;
+		if (this.token) this.setToken(null);
+		this.ui.viewer = null;
+		if (this.requiresSignIn) this.openSignIn();
+	}
+
+	/** Dashboard approval flow: opens the authorize page and polls for the token. */
+	approveFromDashboard(): void {
 		if (this.ui.auth.status === 'waiting') return;
 		const id = randomId();
 		const secret = randomSecret();
@@ -587,7 +706,7 @@ export class WidgetController {
 		} catch {
 			popup = null;
 		}
-		this.ui.auth = { status: popup ? 'waiting' : 'blocked', url, message: '' };
+		this.ui.auth = { status: popup ? 'waiting' : 'blocked', mode: 'login', url, message: '' };
 		void this.runAuthFlow(id, secret, popup);
 	}
 
@@ -600,6 +719,7 @@ export class WidgetController {
 		} catch (err) {
 			this.ui.auth = {
 				status: 'error',
+				mode: 'login',
 				url: '',
 				message: err instanceof NotetteApiError ? err.message : 'Could not start sign-in'
 			};
@@ -612,39 +732,35 @@ export class WidgetController {
 			if (abort.signal.aborted) return;
 			try {
 				const result = await this.api.pollAuthRequest(id, secret, abort.signal);
-				if (result.status === 'approved' && result.token) {
-					this.setToken(result.token);
-					this.ui.viewer = result.viewer ?? null;
-					this.ui.auth = { status: 'idle', url: '', message: '' };
+				if (result.status === 'approved' && result.token && result.viewer) {
 					try {
 						popup?.close();
 					} catch {
 						/* cross-origin popup may not be closable */
 					}
-					this.toast(`Signed in as ${result.viewer?.name ?? 'admin'}`, 'success');
-					await this.loadPageItems();
+					await this.applySignedIn({ token: result.token, viewer: result.viewer }, `Signed in as ${result.viewer.name}`);
 					return;
 				}
 				if (result.status === 'denied' || result.status === 'expired') {
-					this.ui.auth = { status: result.status, url: '', message: '' };
+					this.ui.auth = { status: result.status, mode: 'login', url: '', message: '' };
 					return;
 				}
 			} catch (err) {
 				if (err instanceof DOMException && err.name === 'AbortError') return;
 				if (err instanceof NotetteApiError && err.status === 404) {
-					this.ui.auth = { status: 'expired', url: '', message: '' };
+					this.ui.auth = { status: 'expired', mode: 'login', url: '', message: '' };
 					return;
 				}
 				// Transient errors: keep polling.
 			}
 		}
-		if (!abort.signal.aborted) this.ui.auth = { status: 'expired', url: '', message: '' };
+		if (!abort.signal.aborted) this.ui.auth = { status: 'expired', mode: 'login', url: '', message: '' };
 	}
 
 	cancelSignIn(): void {
 		this.authAbort?.abort();
 		this.authAbort = null;
-		this.ui.auth = { status: 'idle', url: '', message: '' };
+		this.ui.auth = { status: 'idle', mode: 'login', url: '', message: '' };
 	}
 
 	async signOut(): Promise<void> {
@@ -658,6 +774,8 @@ export class WidgetController {
 		this.ui.panelOpen = false;
 		this.closeThread();
 		this.toast('Signed out', 'info');
+		// Without an account the toolbar is unusable on sign-in-only projects.
+		if (this.requiresSignIn) this.collapse();
 		await this.loadPageItems();
 	}
 

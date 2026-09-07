@@ -56,13 +56,19 @@
 			{/if}
 			<span class="sep"></span>
 			{#if ui.viewer}
-				<button class="avatar" type="button" onclick={() => c.signOut()} title="Signed in as {ui.viewer.name} · click to sign out">
+				<button
+					class="avatar"
+					class:member={!ui.viewer.admin}
+					type="button"
+					onclick={() => c.signOut()}
+					title="Signed in as {ui.viewer.name}{ui.viewer.admin ? '' : ' (member)'} · click to sign out"
+				>
 					{initials}
 				</button>
 			{:else}
-				<button class="nt-btn nt-btn-ghost" type="button" onclick={() => c.signIn()} title="Sign in as admin">
+				<button class="nt-btn nt-btn-ghost" type="button" onclick={() => c.openSignIn()} title="Sign in with a Notette account">
 					<Icon name="user" />
-					Admin
+					Sign in
 				</button>
 			{/if}
 			<button class="nt-icon-btn" type="button" onclick={() => c.collapse()} aria-label="Close feedback toolbar">
@@ -170,6 +176,13 @@
 	}
 	.avatar:hover {
 		background: #e0e7ff;
+	}
+	.avatar.member {
+		background: var(--nt-bg-2);
+		color: var(--nt-text-2);
+	}
+	.avatar.member:hover {
+		background: var(--nt-bg-3);
 	}
 	@media (max-width: 480px) {
 		.launcher {

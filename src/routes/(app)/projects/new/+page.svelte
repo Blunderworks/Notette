@@ -8,7 +8,9 @@
 			originsText: '',
 			publicFeedbackVisible: true,
 			reviewerRepliesEnabled: true,
-			screenshotsEnabled: true
+			screenshotsEnabled: true,
+			anonymousFeedbackAllowed: true,
+			openSignups: false
 		}
 	);
 </script>
@@ -63,6 +65,23 @@
 				<span>
 					<strong>Capture screenshots</strong>
 					<span class="help" style="display: block">Attach a viewport screenshot to each feedback item (captured in the browser).</span>
+				</span>
+			</label>
+			<label class="checkbox">
+				<input type="checkbox" name="anonymousFeedbackAllowed" checked={values.anonymousFeedbackAllowed} />
+				<span>
+					<strong>Allow anonymous feedback</strong>
+					<span class="help" style="display: block">When off, visitors must sign in (or sign up, if enabled) before the widget opens.</span>
+				</span>
+			</label>
+			<label class="checkbox">
+				<input type="checkbox" name="openSignups" checked={values.openSignups} />
+				<span>
+					<strong>Open for signups</strong>
+					<span class="help" style="display: block">
+						Anyone can create an account from the widget and any signed-in account joins the project. When off, only
+						members you add in the project settings can sign in.
+					</span>
 				</span>
 			</label>
 		</div>

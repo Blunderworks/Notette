@@ -30,9 +30,15 @@ function compactText(text: string | null | undefined, max = 200): string | null 
  * Renders a feedback item and its context as concise Markdown that a coding
  * agent can act on directly. Used by both the widget and the dashboard.
  */
+function roleSuffix(author: { isAdmin: boolean; isMember?: boolean }): string {
+	if (author.isAdmin) return ' (admin)';
+	if (author.isMember) return ' (member)';
+	return '';
+}
+
 export function formatFeedbackForAgent(item: FeedbackDetailDto, opts: AgentFormatOptions = {}): string {
 	const out: string[] = [];
-	const who = item.authorName ? `${item.authorName}${item.isAdmin ? ' (admin)' : ''}` : 'Anonymous reviewer';
+	const who = item.authorName ? `${item.authorName}${roleSuffix(item)}` : 'Anonymous reviewer';
 	const title = opts.projectName ? `${opts.projectName} feedback #${item.number}` : `Feedback #${item.number}`;
 
 	out.push(`# ${title} (${item.status})`);
@@ -44,7 +50,7 @@ export function formatFeedbackForAgent(item: FeedbackDetailDto, opts: AgentForma
 		out.push('');
 		out.push('## Replies');
 		for (const c of item.comments) {
-			const author = c.authorName ? `${c.authorName}${c.isAdmin ? ' (admin)' : ''}` : 'Anonymous';
+			const author = c.authorName ? `${c.authorName}${roleSuffix(c)}` : 'Anonymous';
 			out.push(`- **${author}** (${c.createdAt}): ${c.body.replace(/\s*\n\s*/g, ' ')}`);
 		}
 	}

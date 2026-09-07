@@ -6,6 +6,7 @@ import { createSession } from '$lib/server/auth/sessions';
 import { sha256 } from '$lib/server/ids';
 import { ApiError } from '$lib/server/http';
 import type { AuthRequestPollDto } from '$lib/shared/types';
+import { toViewerDto } from './users';
 
 /** How long the widget has to complete the sign-in flow. */
 const AUTH_REQUEST_TTL_MS = 10 * 60 * 1000;
@@ -131,7 +132,7 @@ export async function pollAuthRequest(
 			result: {
 				status: 'approved',
 				token: request.token,
-				viewer: { admin: true, name: userRow.name, email: userRow.email }
+				viewer: toViewerDto(userRow)
 			},
 			user: userRow
 		};

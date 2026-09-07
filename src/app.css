@@ -540,6 +540,13 @@ button {
 .badge.admin::before {
 	display: none;
 }
+.badge.member {
+	background: var(--surface-2);
+	color: var(--text-2);
+}
+.badge.member::before {
+	display: none;
+}
 
 /* Tables & lists ---------------------------------------------------------- */
 

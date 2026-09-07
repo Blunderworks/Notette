@@ -38,7 +38,7 @@
 					<span class="meta">
 						{#if showProject}<span>{item.projectName}</span>{/if}
 						<span class="path" title={item.url}>{item.path}</span>
-						<span>{item.authorName ?? 'Anonymous'}{item.isAdmin ? ' · admin' : ''}</span>
+						<span>{item.authorName ?? 'Anonymous'}{item.isAdmin ? ' · admin' : item.isMember ? ' · member' : ''}</span>
 						{#if item.commentCount > 0}
 							<span>{item.commentCount} {item.commentCount === 1 ? 'reply' : 'replies'}</span>
 						{/if}

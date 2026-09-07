@@ -2,18 +2,21 @@ import { json } from '@sveltejs/kit';
 import { eq } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { feedback as feedbackTable } from '$lib/server/db/schema';
-import { ApiError, api, clientAddress, readJson } from '$lib/server/http';
+import { adminUser, ApiError, api, clientAddress, readJson } from '$lib/server/http';
 import { baseUrl } from '$lib/server/base-url';
 import { randomToken, sha256 } from '$lib/server/ids';
 import { isOriginAllowed, normalizeOrigin } from '$lib/server/origins';
 import { rateLimit } from '$lib/server/rate-limit';
 import { createFeedback, getFeedbackThread, listFeedback, toDetailDto, toSummaryDto } from '$lib/server/services/feedback';
+import { requireTurnstile } from '$lib/server/turnstile';
 import { feedbackCreateSchema } from '$lib/server/validation';
+import { requireWidgetViewer } from '$lib/server/widget-access';
 import type { FeedbackListDto } from '$lib/shared/types';
 
 export const GET = api(async (event) => {
 	const { project } = event.locals.widget!;
-	const admin = event.locals.user;
+	requireWidgetViewer(event);
+	const admin = adminUser(event);
 	if (!admin && !project.publicFeedbackVisible) {
 		return json({ items: [], total: 0 } satisfies FeedbackListDto);
 	}
@@ -48,10 +51,11 @@ export const GET = api(async (event) => {
 
 export const POST = api(async (event) => {
 	const { project, origin } = event.locals.widget!;
-	const admin = event.locals.user;
+	const user = requireWidgetViewer(event);
+	const admin = adminUser(event);
 
 	if (!admin) {
-		const limit = rateLimit(`feedback:${project.id}:${clientAddress(event)}`, 30, 10 * 60 * 1000);
+		const limit = rateLimit(`feedback:${project.id}:${user?.id ?? clientAddress(event)}`, 30, 10 * 60 * 1000);
 		if (!limit.ok) {
 			throw new ApiError(429, 'Too many submissions, please try again later', 'rate_limited', {
 				retryAfter: limit.retryAfter
@@ -60,13 +64,16 @@ export const POST = api(async (event) => {
 	}
 
 	const input = await readJson(event.request, feedbackCreateSchema, 200_000);
+	// Bot protection applies to anonymous reviewers only; signed-in users already authenticated.
+	if (!user) await requireTurnstile(event, input.turnstileToken);
+
 	const pageOrigin = normalizeOrigin(input.page.url);
 	if (!pageOrigin || (pageOrigin !== origin && !isOriginAllowed(pageOrigin, project.allowedOrigins))) {
 		throw new ApiError(400, 'Page URL does not belong to an allowed origin', 'bad_page_url');
 	}
 
 	const created = await createFeedback(project, input, {
-		user: admin,
+		user,
 		userAgent: event.request.headers.get('user-agent')
 	});
 

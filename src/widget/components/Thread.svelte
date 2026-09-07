@@ -7,6 +7,7 @@
 	import { pinPosition } from '../lib/dom';
 	import { placeNear } from '../lib/position';
 	import Icon from './Icon.svelte';
+	import Turnstile from './Turnstile.svelte';
 
 	const c = getContext<WidgetController>('notette');
 	const ui = c.ui;
@@ -23,7 +24,12 @@
 	let copied = $state(false);
 	let screenshotUrl = $state<string | null>(null);
 	let screenshotOpen = $state(false);
+	let turnstileToken = $state<string | null>(null);
+	let turnstileFailed = $state(false);
+	let turnstile = $state<ReturnType<typeof Turnstile> | null>(null);
 	const width = $derived(Math.min(380, window.innerWidth - 24));
+	const waitingForToken = $derived(c.needsTurnstile && !turnstileToken && !turnstileFailed);
+	const canReplyNow = $derived(!busy && !!replyBody.trim() && (!c.needsTurnstile || !!turnstileToken));
 
 	$effect(() => {
 		const bump = () => (tick += 1);
@@ -77,16 +83,18 @@
 
 	async function sendReply(event: SubmitEvent) {
 		event.preventDefault();
-		if (!item || !replyBody.trim() || busy) return;
+		if (!item || !canReplyNow) return;
 		busy = true;
 		error = null;
 		try {
-			await c.reply(item.id, replyBody, { name, email });
+			await c.reply(item.id, replyBody, { name, email }, turnstileToken);
 			replyBody = '';
 		} catch (err) {
 			error = err instanceof NotetteApiError ? err.message : 'Could not post reply.';
 		} finally {
 			busy = false;
+			// Tokens are single-use; request a fresh one for the next reply.
+			turnstile?.reset();
 		}
 	}
 
@@ -184,7 +192,7 @@
 				<button class="nt-icon-btn" type="button" onclick={copyForAgent} title="Copy for Agent" aria-label="Copy for Agent">
 					<Icon name={copied ? 'check' : 'copy'} />
 				</button>
-				{#if ui.viewer && dashboardLink}
+				{#if c.isAdmin && dashboardLink}
 					<a class="nt-icon-btn" href={dashboardLink} target="_blank" rel="noopener" title="Open in dashboard" aria-label="Open in dashboard">
 						<Icon name="external" />
 					</a>
@@ -197,7 +205,7 @@
 			<div class="message root">
 				<div class="meta">
 					<span class="author">{item.authorName ?? 'Anonymous'}</span>
-					{#if item.isAdmin}<span class="nt-badge nt-badge-admin">admin</span>{/if}
+					{#if item.isAdmin}<span class="nt-badge nt-badge-admin">admin</span>{:else if item.isMember}<span class="nt-badge nt-badge-member">member</span>{/if}
 					<span class="nt-faint" title={item.createdAt}>{timeAgo(item.createdAt)}</span>
 				</div>
 				<div class="body">{item.body}</div>
@@ -217,7 +225,7 @@
 				<div class="message">
 					<div class="meta">
 						<span class="author">{comment.authorName ?? 'Anonymous'}</span>
-						{#if comment.isAdmin}<span class="nt-badge nt-badge-admin">admin</span>{/if}
+						{#if comment.isAdmin}<span class="nt-badge nt-badge-admin">admin</span>{:else if comment.isMember}<span class="nt-badge nt-badge-member">member</span>{/if}
 						<span class="nt-faint" title={comment.createdAt}>{timeAgo(comment.createdAt)}</span>
 					</div>
 					<div class="body">{comment.body}</div>
@@ -244,9 +252,12 @@
 						<input class="nt-input" type="email" bind:value={email} placeholder="Email (optional)" maxlength="254" disabled={busy} />
 					</div>
 				{/if}
+				{#if c.needsTurnstile && ui.turnstileSiteKey}
+					<Turnstile bind:this={turnstile} siteKey={ui.turnstileSiteKey} action="reply" bind:token={turnstileToken} bind:failed={turnstileFailed} />
+				{/if}
 				<div class="foot">
 					<span class="admin-actions">
-						{#if ui.viewer}
+						{#if c.isAdmin}
 							<button class="nt-btn nt-btn-sm" type="button" onclick={toggleStatus} disabled={busy}>
 								<Icon name={item.status === 'open' ? 'check' : 'refresh'} size={13} />
 								{item.status === 'open' ? 'Resolve' : 'Reopen'}
@@ -256,10 +267,12 @@
 							</button>
 						{/if}
 					</span>
-					<button class="nt-btn nt-btn-primary nt-btn-sm" type="submit" disabled={busy || !replyBody.trim()}>Reply</button>
+					<button class="nt-btn nt-btn-primary nt-btn-sm" type="submit" disabled={!canReplyNow}>
+						{waitingForToken && replyBody.trim() ? 'Verifying…' : 'Reply'}
+					</button>
 				</div>
 			</form>
-		{:else if ui.viewer}
+		{:else if c.isAdmin}
 			<div class="foot">
 				<button class="nt-btn nt-btn-sm" type="button" onclick={toggleStatus} disabled={busy}>
 					{item.status === 'open' ? 'Resolve' : 'Reopen'}

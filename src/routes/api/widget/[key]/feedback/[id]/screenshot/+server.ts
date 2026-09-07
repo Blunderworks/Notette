@@ -3,11 +3,12 @@ import { eq } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { feedback as feedbackTable } from '$lib/server/db/schema';
 import { config } from '$lib/server/env';
-import { ApiError, api } from '$lib/server/http';
+import { adminUser, ApiError, api } from '$lib/server/http';
 import { isUuid, sha256 } from '$lib/server/ids';
 import { getFeedback } from '$lib/server/services/feedback';
 import { getScreenshotForFeedback, saveScreenshot } from '$lib/server/services/uploads';
 import { getStorage } from '$lib/server/storage';
+import { requireWidgetViewer } from '$lib/server/widget-access';
 import { loadWidgetThread } from '$lib/server/widget-thread';
 
 /** Screenshot uploads are accepted for 15 minutes after the item was created. */
@@ -21,6 +22,7 @@ function parseDimension(value: string | null): number | null {
 
 export const PUT = api(async (event) => {
 	const { project } = event.locals.widget!;
+	requireWidgetViewer(event);
 	if (!project.screenshotsEnabled) {
 		throw new ApiError(403, 'Screenshots are disabled for this project', 'forbidden');
 	}
@@ -29,7 +31,8 @@ export const PUT = api(async (event) => {
 	const item = await getFeedback(id);
 	if (!item || item.projectId !== project.id) throw new ApiError(404, 'Feedback not found', 'not_found');
 
-	if (!event.locals.user) {
+	// Only admins may attach screenshots without the one-time token; members use the token like reviewers.
+	if (!adminUser(event)) {
 		const token = event.request.headers.get('x-notette-upload-token') ?? '';
 		const fresh = Date.now() - item.createdAt.getTime() < UPLOAD_WINDOW_MS;
 		if (!item.uploadTokenHash || !token || sha256(token) !== item.uploadTokenHash || !fresh) {

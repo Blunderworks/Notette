@@ -4,6 +4,7 @@ import { baseUrl } from '$lib/server/base-url';
 import { isUuid } from '$lib/server/ids';
 import { addComment, deleteComment } from '$lib/server/services/comments';
 import { deleteFeedback, getFeedbackThread, setFeedbackStatus, toDetailDto } from '$lib/server/services/feedback';
+import { isAdminRole } from '$lib/shared/roles';
 
 async function loadThread(projectId: string, feedbackId: string) {
 	if (!isUuid(feedbackId)) error(404, 'Feedback not found');
@@ -21,7 +22,8 @@ export const load: PageServerLoad = async (event) => {
 			body: c.body,
 			authorName: c.authorName,
 			authorEmail: c.authorEmail,
-			isAdmin: c.userId !== null,
+			isAdmin: isAdminRole(c.authorRole),
+			isMember: c.authorRole === 'member',
 			createdAt: c.createdAt.toISOString()
 		}))
 	};
@@ -40,7 +42,8 @@ export const actions: Actions = {
 			body,
 			authorName: user.name,
 			authorEmail: user.email,
-			userId: user.id
+			userId: user.id,
+			authorRole: user.role
 		});
 		return { action: 'reply', success: true };
 	},

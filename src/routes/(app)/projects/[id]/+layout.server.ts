@@ -19,6 +19,8 @@ export const load: LayoutServerLoad = async (event) => {
 			publicFeedbackVisible: project.publicFeedbackVisible,
 			reviewerRepliesEnabled: project.reviewerRepliesEnabled,
 			screenshotsEnabled: project.screenshotsEnabled,
+			anonymousFeedbackAllowed: project.anonymousFeedbackAllowed,
+			openSignups: project.openSignups,
 			openCount: project.openCount,
 			resolvedCount: project.resolvedCount,
 			createdAt: project.createdAt.toISOString()

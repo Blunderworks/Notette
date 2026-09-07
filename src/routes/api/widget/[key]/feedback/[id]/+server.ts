@@ -1,5 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { ApiError, api, readJson, requireUser } from '$lib/server/http';
+import { ApiError, api, readJson, requireAdmin } from '$lib/server/http';
 import { baseUrl } from '$lib/server/base-url';
 import { deleteFeedback, getFeedbackThread, setFeedbackStatus, toDetailDto } from '$lib/server/services/feedback';
 import { feedbackPatchSchema } from '$lib/server/validation';
@@ -11,7 +11,7 @@ export const GET = api(async (event) => {
 });
 
 export const PATCH = api(async (event) => {
-	const user = requireUser(event);
+	const user = requireAdmin(event);
 	const thread = await loadWidgetThread(event);
 	const input = await readJson(event.request, feedbackPatchSchema);
 	await setFeedbackStatus(thread.item.id, input.status, user);
@@ -21,7 +21,7 @@ export const PATCH = api(async (event) => {
 });
 
 export const DELETE = api(async (event) => {
-	requireUser(event);
+	requireAdmin(event);
 	const thread = await loadWidgetThread(event);
 	await deleteFeedback(thread.item.id);
 	return new Response(null, { status: 204 });

@@ -3,8 +3,10 @@ import { db } from '$lib/server/db';
 import { users, type User } from '$lib/server/db/schema';
 import { hashPassword } from '$lib/server/auth/password';
 import { ApiError } from '$lib/server/http';
+import { isAdminRole, type UserRole } from '$lib/shared/roles';
+import type { WidgetViewerDto } from '$lib/shared/types';
 
-export type UserRole = 'owner' | 'admin';
+export type { UserRole } from '$lib/shared/roles';
 
 export async function countUsers(): Promise<number> {
 	const [row] = await db.select({ count: sql<number>`count(*)::int` }).from(users);
@@ -64,6 +66,11 @@ export async function setUserPassword(id: string, password: string): Promise<voi
 export async function deleteUser(id: string): Promise<boolean> {
 	const deleted = await db.delete(users).where(eq(users.id, id)).returning({ id: users.id });
 	return deleted.length > 0;
+}
+
+/** Viewer identity returned to the widget after sign-in or on config load. */
+export function toViewerDto(user: User): WidgetViewerDto {
+	return { admin: isAdminRole(user.role), role: user.role, name: user.name, email: user.email };
 }
 
 export async function countOwners(): Promise<number> {

@@ -3,6 +3,10 @@
  * This file must stay free of server-only or framework-specific imports.
  */
 
+import type { UserRole } from './roles';
+
+export type { UserRole } from './roles';
+
 export type FeedbackStatus = 'open' | 'resolved';
 
 export interface ElementRect {
@@ -27,6 +31,8 @@ export interface FeedbackCreatePayload {
 		name?: string;
 		email?: string;
 	};
+	/** Cloudflare Turnstile response, required for anonymous submissions when configured. */
+	turnstileToken?: string;
 	page: {
 		url: string;
 		title?: string;
@@ -60,7 +66,10 @@ export interface CommentDto {
 	id: string;
 	body: string;
 	authorName: string | null;
+	/** Posted by an owner/admin. */
 	isAdmin: boolean;
+	/** Posted by a signed-in member (non-admin account). */
+	isMember: boolean;
 	createdAt: string;
 }
 
@@ -73,7 +82,10 @@ export interface FeedbackSummaryDto {
 	path: string;
 	pageTitle: string | null;
 	authorName: string | null;
+	/** Posted by an owner/admin. */
 	isAdmin: boolean;
+	/** Posted by a signed-in member (non-admin account). */
+	isMember: boolean;
 	createdAt: string;
 	updatedAt: string;
 	resolvedAt: string | null;
@@ -111,7 +123,9 @@ export interface FeedbackListDto {
 }
 
 export interface WidgetViewerDto {
-	admin: true;
+	/** True for owners and admins (full access, moderation actions). */
+	admin: boolean;
+	role: UserRole;
 	name: string;
 	email: string;
 }
@@ -123,16 +137,43 @@ export interface WidgetConfigDto {
 		publicFeedbackVisible: boolean;
 		reviewerRepliesEnabled: boolean;
 		screenshotsEnabled: boolean;
+		/** False means the widget requires a signed-in user before it can be used. */
+		anonymousFeedbackAllowed: boolean;
+		/** True means anyone can create an account from the widget and join the project. */
+		openSignups: boolean;
 	};
 	viewer: WidgetViewerDto | null;
 	/** Absolute URL of the dashboard, used for "open in dashboard" links. */
 	dashboardUrl: string;
+	/** Cloudflare Turnstile site key when bot protection is configured, otherwise null. */
+	turnstileSiteKey: string | null;
 }
 
 export interface AuthRequestPollDto {
 	status: 'pending' | 'approved' | 'denied' | 'expired';
 	token?: string;
 	viewer?: WidgetViewerDto;
+}
+
+/** Payload for the widget's inline sign-in form. */
+export interface WidgetLoginPayload {
+	email: string;
+	password: string;
+	turnstileToken?: string;
+}
+
+/** Payload for the widget's inline sign-up form (open projects only). */
+export interface WidgetSignupPayload {
+	name: string;
+	email: string;
+	password: string;
+	turnstileToken?: string;
+}
+
+/** Response of both widget sign-in and sign-up. */
+export interface WidgetAuthResultDto {
+	token: string;
+	viewer: WidgetViewerDto;
 }
 
 export interface ApiErrorDto {

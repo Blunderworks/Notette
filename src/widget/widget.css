@@ -236,6 +236,13 @@ kbd {
 .nt-badge-admin::before {
 	display: none;
 }
+.nt-badge-member {
+	background: var(--nt-bg-2);
+	color: var(--nt-text-2);
+}
+.nt-badge-member::before {
+	display: none;
+}
 
 .nt-muted {
 	color: var(--nt-text-2);

@@ -4,6 +4,7 @@
 	import type { WidgetController } from '../lib/controller.svelte';
 	import { placeNear } from '../lib/position';
 	import Icon from './Icon.svelte';
+	import Turnstile from './Turnstile.svelte';
 
 	const c = getContext<WidgetController>('notette');
 	const ui = c.ui;
@@ -20,7 +21,12 @@
 	let textarea = $state<HTMLTextAreaElement | null>(null);
 	let height = $state(0);
 	let tick = $state(0);
+	let turnstileToken = $state<string | null>(null);
+	let turnstileFailed = $state(false);
+	let turnstile = $state<ReturnType<typeof Turnstile> | null>(null);
 	const width = $derived(Math.min(340, window.innerWidth - 24));
+	const waitingForToken = $derived(c.needsTurnstile && !turnstileToken && !turnstileFailed);
+	const canSend = $derived(!submitting && !!body.trim() && (!c.needsTurnstile || !!turnstileToken));
 
 	$effect(() => {
 		textarea?.focus();
@@ -44,14 +50,16 @@
 
 	async function submit(event: SubmitEvent) {
 		event.preventDefault();
-		if (!body.trim() || submitting) return;
+		if (!canSend) return;
 		submitting = true;
 		error = null;
 		stage = includeScreenshot && ui.project?.screenshotsEnabled ? 'capturing' : 'sending';
 		try {
-			await c.submitFeedback({ target, body, author: { name, email }, screenshot: includeScreenshot });
+			await c.submitFeedback({ target, body, author: { name, email }, screenshot: includeScreenshot, turnstileToken });
 		} catch (err) {
 			error = err instanceof NotetteApiError ? err.message : 'Could not send feedback. Please try again.';
+			// The token was consumed by the failed attempt; request a new one.
+			turnstile?.reset();
 		} finally {
 			submitting = false;
 			stage = 'idle';
@@ -101,6 +109,9 @@
 			<input class="nt-input" type="email" bind:value={email} placeholder="Email (optional)" maxlength="254" disabled={submitting} />
 		</div>
 	{/if}
+	{#if c.needsTurnstile && ui.turnstileSiteKey}
+		<Turnstile bind:this={turnstile} siteKey={ui.turnstileSiteKey} action="feedback" bind:token={turnstileToken} bind:failed={turnstileFailed} />
+	{/if}
 	{#if error}<div class="nt-error">{error}</div>{/if}
 	<div class="foot">
 		{#if ui.project?.screenshotsEnabled}
@@ -114,8 +125,8 @@
 		{/if}
 		<span class="actions">
 			<span class="nt-faint nt-small hint">⌘/Ctrl + Enter</span>
-			<button class="nt-btn nt-btn-primary" type="submit" disabled={submitting || !body.trim()}>
-				{#if stage === 'capturing'}Capturing…{:else if stage === 'sending'}Sending…{:else}Send{/if}
+			<button class="nt-btn nt-btn-primary" type="submit" disabled={!canSend}>
+				{#if stage === 'capturing'}Capturing…{:else if stage === 'sending'}Sending…{:else if waitingForToken}Verifying…{:else}Send{/if}
 			</button>
 		</span>
 	</div>

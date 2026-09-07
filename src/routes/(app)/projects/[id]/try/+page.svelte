@@ -48,8 +48,11 @@
 	{:else}
 		<div class="notice">
 			The widget is live on this page{loaded ? '' : ' (loading…)'}. Use the launcher in the bottom-right corner:
-			click <strong>Comment</strong>, then click any element below to leave feedback. Sign in as admin from the
-			launcher to resolve items and browse the whole project.
+			click <strong>Comment</strong>, then click any element below to leave feedback. Choose <strong>Sign in</strong> in
+			the launcher with your admin account to resolve items and browse the whole project.
+			{#if !project.anonymousFeedbackAllowed}
+				This project does not allow anonymous feedback, so the launcher opens the sign-in form first.
+			{/if}
 		</div>
 
 		<section class="card" id="demo-hero">

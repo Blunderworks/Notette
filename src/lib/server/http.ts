@@ -2,6 +2,7 @@ import { json, type RequestEvent, type RequestHandler } from '@sveltejs/kit';
 import { ZodError, type ZodType } from 'zod';
 import type { ApiErrorDto } from '$lib/shared/types';
 import type { User } from '$lib/server/db/schema';
+import { isAdminRole } from '$lib/shared/roles';
 
 export class ApiError extends Error {
 	constructor(
@@ -72,6 +73,19 @@ export async function readJson<T>(request: Request, schema: ZodType<T>, maxBytes
 export function requireUser(event: RequestEvent): User {
 	if (!event.locals.user) throw new ApiError(401, 'Authentication required', 'unauthorized');
 	return event.locals.user;
+}
+
+/** Owners and admins only; members and anonymous requests are rejected. */
+export function requireAdmin(event: RequestEvent): User {
+	const user = requireUser(event);
+	if (!isAdminRole(user.role)) throw new ApiError(403, 'Admin access required', 'forbidden');
+	return user;
+}
+
+/** The signed-in user when they are an owner/admin, otherwise null. */
+export function adminUser(event: RequestEvent): User | null {
+	const user = event.locals.user;
+	return user && isAdminRole(user.role) ? user : null;
 }
 
 export function clientAddress(event: RequestEvent): string {

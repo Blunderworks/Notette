@@ -24,20 +24,24 @@
 			Notette
 		</a>
 		<a class="nav-link" class:active={isActive('/', true)} href="/">Overview</a>
-		<a class="nav-link" class:active={isActive('/feedback')} href="/feedback">All feedback</a>
+		{#if data.isAdmin}
+			<a class="nav-link" class:active={isActive('/feedback')} href="/feedback">All feedback</a>
 
-		<div class="nav-section">Projects</div>
-		{#each data.navProjects as project (project.id)}
-			<a class="nav-link" class:active={isActive(`/projects/${project.id}`)} href="/projects/{project.id}">
-				<span class="truncate">{project.name}</span>
-				{#if project.openCount > 0}<span class="count">{project.openCount}</span>{/if}
-			</a>
-		{/each}
-		<a class="nav-link" class:active={isActive('/projects/new')} href="/projects/new">+ New project</a>
+			<div class="nav-section">Projects</div>
+			{#each data.navProjects as project (project.id)}
+				<a class="nav-link" class:active={isActive(`/projects/${project.id}`)} href="/projects/{project.id}">
+					<span class="truncate">{project.name}</span>
+					{#if project.openCount > 0}<span class="count">{project.openCount}</span>{/if}
+				</a>
+			{/each}
+			<a class="nav-link" class:active={isActive('/projects/new')} href="/projects/new">+ New project</a>
+		{/if}
 
 		<div class="nav-section">Settings</div>
 		<a class="nav-link" class:active={isActive('/settings/account')} href="/settings/account">Account</a>
-		<a class="nav-link" class:active={isActive('/settings/users')} href="/settings/users">Users</a>
+		{#if data.isAdmin}
+			<a class="nav-link" class:active={isActive('/settings/users')} href="/settings/users">Users</a>
+		{/if}
 
 		<div class="sidebar-footer stack-sm">
 			<div class="truncate" title={data.user?.email}>{data.user?.name}</div>

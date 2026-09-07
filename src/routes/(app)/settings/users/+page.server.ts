@@ -3,6 +3,12 @@ import type { Actions, PageServerLoad } from './$types';
 import { countOwners, createUser, deleteUser, getUserById, listUsers, updateUserProfile } from '$lib/server/services/users';
 import { emailSchema, passwordSchema } from '$lib/server/validation';
 import { ApiError } from '$lib/server/http';
+import { isUserRole, type UserRole } from '$lib/shared/roles';
+
+function parseRole(value: FormDataEntryValue | null, fallback: UserRole = 'admin'): UserRole {
+	const raw = String(value ?? '');
+	return isUserRole(raw) ? raw : fallback;
+}
 
 export const load: PageServerLoad = async ({ locals }) => {
 	const users = await listUsers();
@@ -34,7 +40,7 @@ export const actions: Actions = {
 		const name = String(form.get('name') ?? '').trim();
 		const emailRaw = String(form.get('email') ?? '');
 		const password = String(form.get('password') ?? '');
-		const role = String(form.get('role') ?? 'admin') === 'owner' ? 'owner' : 'admin';
+		const role = parseRole(form.get('role'));
 		const values = { name, email: emailRaw.trim().toLowerCase(), role };
 
 		const email = emailSchema.safeParse(emailRaw);
@@ -56,10 +62,10 @@ export const actions: Actions = {
 		if (denied) return denied;
 		const form = await request.formData();
 		const id = String(form.get('userId') ?? '');
-		const role = String(form.get('role') ?? '') === 'owner' ? 'owner' : 'admin';
+		const role = parseRole(form.get('role'));
 		const target = await getUserById(id);
 		if (!target) return fail(404, { action: 'setRole', error: 'User not found.' });
-		if (target.role === 'owner' && role === 'admin' && (await countOwners()) <= 1) {
+		if (target.role === 'owner' && role !== 'owner' && (await countOwners()) <= 1) {
 			return fail(400, { action: 'setRole', error: 'At least one owner is required.' });
 		}
 		await updateUserProfile(id, { role });

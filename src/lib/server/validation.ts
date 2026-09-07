@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from '$lib/server/auth/password';
+import { TURNSTILE_TOKEN_MAX_LENGTH } from '$lib/server/turnstile-verify';
 
 const shortText = (max: number) => z.string().trim().max(max);
 const optionalShortText = (max: number) =>
@@ -15,6 +16,9 @@ export const passwordSchema = z
 	.string()
 	.min(PASSWORD_MIN_LENGTH, `Password must be at least ${PASSWORD_MIN_LENGTH} characters`)
 	.max(PASSWORD_MAX_LENGTH);
+
+/** Turnstile response token; only checked server-side when bot protection is configured. */
+const turnstileTokenSchema = z.string().max(TURNSTILE_TOKEN_MAX_LENGTH).optional();
 
 const finiteInt = z.number().finite().transform((n) => Math.round(n));
 
@@ -79,7 +83,8 @@ export const feedbackCreateSchema = z.object({
 		})
 		.optional(),
 	deployment: deploymentSchema.optional(),
-	metadata: metadataSchema.optional()
+	metadata: metadataSchema.optional(),
+	turnstileToken: turnstileTokenSchema
 });
 
 export type FeedbackCreateInput = z.infer<typeof feedbackCreateSchema>;
@@ -96,7 +101,21 @@ export const commentCreateSchema = z.object({
 				.optional()
 				.transform((v) => (v ? v.toLowerCase() : undefined))
 		})
-		.optional()
+		.optional(),
+	turnstileToken: turnstileTokenSchema
+});
+
+export const widgetLoginSchema = z.object({
+	email: emailSchema,
+	password: z.string().min(1, 'Password is required').max(PASSWORD_MAX_LENGTH),
+	turnstileToken: turnstileTokenSchema
+});
+
+export const widgetSignupSchema = z.object({
+	name: shortText(120).pipe(z.string().min(1, 'Name is required')),
+	email: emailSchema,
+	password: passwordSchema,
+	turnstileToken: turnstileTokenSchema
 });
 
 export const feedbackPatchSchema = z.object({

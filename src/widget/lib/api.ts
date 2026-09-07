@@ -6,7 +6,10 @@ import type {
 	FeedbackDetailDto,
 	FeedbackListDto,
 	FeedbackStatus,
-	WidgetConfigDto
+	WidgetAuthResultDto,
+	WidgetConfigDto,
+	WidgetLoginPayload,
+	WidgetSignupPayload
 } from '$lib/shared/types';
 
 export class NotetteApiError extends Error {
@@ -126,8 +129,16 @@ export class ApiClient {
 		return this.request(`/feedback/${encodeURIComponent(id)}/screenshot`);
 	}
 
-	addComment(id: string, body: string, author?: { name?: string; email?: string }): Promise<CommentDto> {
-		return this.request(`/feedback/${encodeURIComponent(id)}/comments`, { method: 'POST', body: { body, author } });
+	addComment(
+		id: string,
+		body: string,
+		author?: { name?: string; email?: string },
+		turnstileToken?: string
+	): Promise<CommentDto> {
+		return this.request(`/feedback/${encodeURIComponent(id)}/comments`, {
+			method: 'POST',
+			body: { body, author, turnstileToken }
+		});
 	}
 
 	setStatus(id: string, status: FeedbackStatus): Promise<FeedbackDetailDto> {
@@ -148,6 +159,16 @@ export class ApiClient {
 			body: { pollSecret },
 			signal
 		});
+	}
+
+	/** Inline sign-in with email + password; returns a widget token bound to this project and origin. */
+	login(payload: WidgetLoginPayload): Promise<WidgetAuthResultDto> {
+		return this.request('/auth/login', { method: 'POST', body: payload });
+	}
+
+	/** Inline sign-up (projects open for signups only). */
+	signup(payload: WidgetSignupPayload): Promise<WidgetAuthResultDto> {
+		return this.request('/auth/signup', { method: 'POST', body: payload });
 	}
 
 	logout(): Promise<void> {

@@ -5,7 +5,8 @@ Self-hosted, framework-agnostic preview feedback. Drop one `<script>` tag into a
 - **Widget**: standalone browser bundle served by your Notette instance, rendered in a Shadow DOM so it never touches the host page's styles or behaviour.
 - **Context captured**: URL, page title, viewport, scroll position, click position, CSS selector + XPath, element text/attributes, bounding box, user agent, viewport screenshot (never blocks submission), plus optional deployment metadata (environment, branch, commit, URL).
 - **Threads**: replies, open/resolved status, admin badges.
-- **On-site admin**: sign in from the widget (popup + polling, no third-party cookies), resolve/reopen/delete, browse feedback across all pages of a project and jump straight to each pin.
+- **On-site admin**: sign in from the widget (inline email/password, or approve from the dashboard; no third-party cookies), resolve/reopen/delete, browse feedback across all pages of a project and jump straight to each pin.
+- **Access control**: allow anonymous feedback, or require an account. Member accounts can be assigned to specific projects, or a project can be opened for self-service signups from the widget. Optional Cloudflare Turnstile protects anonymous submissions and sign-in/sign-up.
 - **Dashboard**: cross-project overview, search/filter, thread view with full context, project settings and embed snippet, users and sessions.
 - **Copy for Agent**: one click copies the feedback with page, DOM, deployment and screenshot context as concise Markdown for a coding agent.
 
@@ -63,6 +64,7 @@ Configuration is entirely through environment variables (see `.env.example`):
 | `NOTETTE_SESSION_DAYS` | `30` | Session lifetime (sliding) |
 | `NOTETTE_AUTO_MIGRATE` | `true` | Apply migrations at startup |
 | `ADDRESS_HEADER` / `XFF_DEPTH` | — | Set `ADDRESS_HEADER=x-forwarded-for` behind a reverse proxy so rate limiting sees real client IPs |
+| `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` | — | Optional Cloudflare Turnstile keys. When both are set, anonymous feedback and replies, widget sign-in/sign-up and the dashboard login require a challenge; unset means no bot protection |
 | `PORT` / `HOST` / `BODY_SIZE_LIMIT` | `3000` / `0.0.0.0` / `12M` | Node server settings |
 
 Put a TLS-terminating reverse proxy (Caddy, nginx, Traefik) in front of port 3000 and set `NOTETTE_URL` to the public HTTPS URL. The container derives `ORIGIN` from `NOTETTE_URL` automatically. Health check: `GET /api/health`.
@@ -95,7 +97,8 @@ docker compose up -d
 ## Administration
 
 - **First admin**: `/setup` is available only while no users exist; alternatively set `NOTETTE_ADMIN_EMAIL` and `NOTETTE_ADMIN_PASSWORD`.
-- **Users**: *Settings → Users*. Owners can add/remove users and change roles; admins can do everything else (manage projects, triage feedback, act as admin in the widget).
+- **Users and roles**: *Settings → Users*. Owners can add/remove users and change roles; admins can do everything else (manage projects, triage feedback, act as admin in the widget). **Members** are regular accounts for reviewers: they can only sign in to the widget on projects they belong to (added under the project's settings, or by signing up on a project that is open for signups) and see a minimal dashboard with their projects and account page. Admins can also create member accounts directly from a project's *Members* card.
+- **Bot protection**: set `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` (Cloudflare Turnstile, free) to require a challenge for anonymous feedback and replies, widget sign-in/sign-up and the dashboard login. Without the keys nothing changes. Sites embedding the widget must allow `https://challenges.cloudflare.com` in `script-src` and `frame-src` if they set a Content Security Policy.
 - **Password reset** when locked out: `docker compose exec app node scripts/reset-password.mjs you@example.com 'new-password'` (creates the account if it does not exist).
 - **Sessions**: *Settings → Account* lists dashboard and widget sessions with the site origin each widget token was issued to, and lets you revoke them. Changing your password signs out all other sessions.
 - **Security defaults**: scrypt password hashing, httpOnly SameSite cookies, CSRF-protected forms, CSP on dashboard pages, per-project origin allow-lists, bearer tokens bound to one project and origin, rate limiting on submissions and sign-in, screenshot uploads authorised by a one-time token, magic-byte validation of images.
@@ -104,10 +107,13 @@ docker compose up -d
 
 1. *New project* in the dashboard. Give it a name and the **allowed origins** of the sites that embed the widget, one per line. Wildcards are supported for preview deployments, e.g. `https://*.vercel.app`, `https://*-myteam.vercel.app` or `http://localhost:*`. A lone `*` allows any origin.
 2. Settings per project:
-   - *Reviewers can see existing feedback* — show pins, threads and screenshots to anyone on the site (default on). Turn off for sensitive sites; admins always see everything.
+   - *Reviewers can see existing feedback* — show pins, threads and screenshots to reviewers (anonymous visitors and signed-in members; default on). Turn off for sensitive sites; admins always see everything.
    - *Reviewers can reply to threads*.
    - *Capture screenshots*.
-3. The **client key** (`ntk_…`) is a public identifier, not a secret; the origin allow-list is what protects the API. Regenerate it from the settings page if needed.
+   - *Allow anonymous feedback* (default on) — anyone on the site can use the widget. Turn it off to require an account: the widget then opens a small sign-in form instead of the toolbar.
+   - *Open for signups* (default off) — visitors can create a member account from the widget, and any signed-in account joins the project on first use. When off, only members listed in the project's *Members* card (plus owners and admins) can sign in on that project.
+3. **Members**: the *Members* card on the settings page lists who has access, lets you add existing member accounts or create new ones, and remove them (removal also revokes their widget sessions for that project).
+4. The **client key** (`ntk_…`) is a public identifier, not a secret; the origin allow-list is what protects the API. Regenerate it from the settings page if needed.
 
 ## Embedding the widget
 
@@ -144,7 +150,8 @@ The `window.Notette` API also offers `open()`, `close()`, `comment()` (start pic
 Using it:
 
 - Reviewers click the launcher, choose **Comment**, click any element, and write the note. The widget records the element and page context, captures a screenshot (if enabled) and submits. Pins show existing feedback; clicking one opens the thread.
-- Admins choose **Admin** in the launcher. A Notette window opens (sign in if needed) and asks to approve access for that site; the widget then polls for the approval, so it works across origins and with popup blockers or COOP-isolated pages. The resulting token lives only in that site's `localStorage` and is bound to that project and origin. Admins can resolve, reopen, delete, and use **List → All pages** to browse the whole project; selecting an item navigates to its page and highlights the pin.
+- On projects that do not allow anonymous feedback, clicking the launcher opens a small **sign-in** form instead (with a **create account** option when the project is open for signups). Members post under their account name; admins get the full toolbar.
+- Admins and members can also choose **Sign in** in the launcher at any time. The form signs in with the Notette email and password directly; alternatively, *Approve from the Notette dashboard* opens a Notette window that asks to approve access for that site and the widget polls for the approval (works across origins, with popup blockers and on COOP-isolated pages). Either way the resulting token lives only in that site's `localStorage` and is bound to that project and origin. Admins can resolve, reopen, delete, and use **List → All pages** to browse the whole project; selecting an item navigates to its page and highlights the pin.
 - Deep links: append `?notette=<feedback id>` to a page URL (the dashboard's *Open on site* button does this) to focus a specific item on load.
 - **Copy for Agent** (widget thread header or dashboard detail page) copies the item plus its context as Markdown.
 

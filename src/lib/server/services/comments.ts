@@ -1,10 +1,21 @@
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, getTableColumns } from 'drizzle-orm';
 import { db } from '$lib/server/db';
-import { comments, feedback, type Comment } from '$lib/server/db/schema';
+import { comments, feedback, users, type Comment } from '$lib/server/db/schema';
+import { isAdminRole, type UserRole } from '$lib/shared/roles';
 import type { CommentDto } from '$lib/shared/types';
 
-export async function listComments(feedbackId: string): Promise<Comment[]> {
-	return db.select().from(comments).where(eq(comments.feedbackId, feedbackId)).orderBy(asc(comments.createdAt));
+/** A comment plus the current role of its author (null for anonymous or deleted accounts). */
+export interface CommentRow extends Comment {
+	authorRole: UserRole | null;
+}
+
+export async function listComments(feedbackId: string): Promise<CommentRow[]> {
+	return db
+		.select({ ...getTableColumns(comments), authorRole: users.role })
+		.from(comments)
+		.leftJoin(users, eq(users.id, comments.userId))
+		.where(eq(comments.feedbackId, feedbackId))
+		.orderBy(asc(comments.createdAt));
 }
 
 export async function addComment(input: {
@@ -13,7 +24,8 @@ export async function addComment(input: {
 	authorName?: string | null;
 	authorEmail?: string | null;
 	userId?: string | null;
-}): Promise<Comment> {
+	authorRole?: UserRole | null;
+}): Promise<CommentRow> {
 	return db.transaction(async (tx) => {
 		const [row] = await tx
 			.insert(comments)
@@ -26,7 +38,7 @@ export async function addComment(input: {
 			})
 			.returning();
 		await tx.update(feedback).set({ updatedAt: new Date() }).where(eq(feedback.id, input.feedbackId));
-		return row;
+		return { ...row, authorRole: input.userId ? (input.authorRole ?? null) : null };
 	});
 }
 
@@ -35,12 +47,13 @@ export async function deleteComment(id: string): Promise<boolean> {
 	return deleted.length > 0;
 }
 
-export function toCommentDto(c: Comment): CommentDto {
+export function toCommentDto(c: CommentRow): CommentDto {
 	return {
 		id: c.id,
 		body: c.body,
 		authorName: c.authorName,
-		isAdmin: c.userId !== null,
+		isAdmin: isAdminRole(c.authorRole),
+		isMember: c.authorRole === 'member',
 		createdAt: c.createdAt.toISOString()
 	};
 }

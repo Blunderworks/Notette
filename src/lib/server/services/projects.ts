@@ -1,4 +1,4 @@
-import { desc, eq, sql } from 'drizzle-orm';
+import { desc, eq, getTableColumns, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { feedback, projects, type Project } from '$lib/server/db/schema';
 import { generateClientKey } from '$lib/server/ids';
@@ -16,6 +16,8 @@ export interface ProjectInput {
 	publicFeedbackVisible: boolean;
 	reviewerRepliesEnabled: boolean;
 	screenshotsEnabled: boolean;
+	anonymousFeedbackAllowed: boolean;
+	openSignups: boolean;
 }
 
 const openCount = sql<number>`(select count(*)::int from ${feedback} f where f.project_id = ${projects.id} and f.status = 'open')`;
@@ -29,25 +31,12 @@ function withCounts(row: Project & { openCount: number; resolvedCount: number; l
 	};
 }
 
+function selectWithCounts() {
+	return db.select({ ...getTableColumns(projects), openCount, resolvedCount, lastFeedbackAt }).from(projects);
+}
+
 export async function listProjects(): Promise<ProjectWithCounts[]> {
-	const rows = await db
-		.select({
-			id: projects.id,
-			name: projects.name,
-			clientKey: projects.clientKey,
-			allowedOrigins: projects.allowedOrigins,
-			publicFeedbackVisible: projects.publicFeedbackVisible,
-			reviewerRepliesEnabled: projects.reviewerRepliesEnabled,
-			screenshotsEnabled: projects.screenshotsEnabled,
-			feedbackSeq: projects.feedbackSeq,
-			createdAt: projects.createdAt,
-			updatedAt: projects.updatedAt,
-			openCount,
-			resolvedCount,
-			lastFeedbackAt
-		})
-		.from(projects)
-		.orderBy(desc(projects.createdAt));
+	const rows = await selectWithCounts().orderBy(desc(projects.createdAt));
 	return rows.map(withCounts);
 }
 
@@ -57,25 +46,7 @@ export async function getProject(id: string): Promise<Project | null> {
 }
 
 export async function getProjectWithCounts(id: string): Promise<ProjectWithCounts | null> {
-	const rows = await db
-		.select({
-			id: projects.id,
-			name: projects.name,
-			clientKey: projects.clientKey,
-			allowedOrigins: projects.allowedOrigins,
-			publicFeedbackVisible: projects.publicFeedbackVisible,
-			reviewerRepliesEnabled: projects.reviewerRepliesEnabled,
-			screenshotsEnabled: projects.screenshotsEnabled,
-			feedbackSeq: projects.feedbackSeq,
-			createdAt: projects.createdAt,
-			updatedAt: projects.updatedAt,
-			openCount,
-			resolvedCount,
-			lastFeedbackAt
-		})
-		.from(projects)
-		.where(eq(projects.id, id))
-		.limit(1);
+	const rows = await selectWithCounts().where(eq(projects.id, id)).limit(1);
 	return rows[0] ? withCounts(rows[0]) : null;
 }
 

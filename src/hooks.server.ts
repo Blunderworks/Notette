@@ -4,8 +4,9 @@ import { config } from '$lib/server/env';
 import { runMigrations } from '$lib/server/db/migrate';
 import { ensureBootstrapAdmin } from '$lib/server/auth/bootstrap';
 import { clearSessionCookie, setSessionCookie } from '$lib/server/auth/cookies';
-import { deleteExpiredSessions, SESSION_COOKIE, validateSession } from '$lib/server/auth/sessions';
+import { deleteExpiredSessions, invalidateSession, SESSION_COOKIE, validateSession } from '$lib/server/auth/sessions';
 import { getRequestOrigin, isOriginAllowed } from '$lib/server/origins';
+import { ensureProjectAccess } from '$lib/server/services/members';
 import { getProjectByClientKey } from '$lib/server/services/projects';
 import { deleteExpiredAuthRequests } from '$lib/server/services/auth-requests';
 import { errorResponse } from '$lib/server/http';
@@ -32,8 +33,8 @@ export const init: ServerInit = async () => {
 
 /**
  * Widget API: validates the project key and the requesting origin, answers
- * CORS preflights, and authenticates admins via bearer tokens only. Cookies are
- * deliberately ignored on these routes.
+ * CORS preflights, and authenticates users (admins and members) via bearer
+ * tokens only. Cookies are deliberately ignored on these routes.
  */
 const widgetApi: Handle = async ({ event, resolve }) => {
 	event.locals.user = null;
@@ -80,8 +81,14 @@ const widgetApi: Handle = async ({ event, resolve }) => {
 			result.session.projectId === project.id &&
 			result.session.origin === origin
 		) {
-			event.locals.user = result.user;
-			event.locals.session = result.session;
+			// Members must still belong to the project (or the project must be open,
+			// which adds them). Access revoked after sign-in ends the session.
+			if (await ensureProjectAccess(result.user, project)) {
+				event.locals.user = result.user;
+				event.locals.session = result.session;
+			} else {
+				await invalidateSession(result.session.id);
+			}
 		}
 	}
 

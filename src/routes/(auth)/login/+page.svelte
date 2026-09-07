@@ -1,8 +1,66 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { onMount } from 'svelte';
+	import { loadTurnstile, type TurnstileApi } from '$lib/shared/turnstile-client';
 
 	let { data, form } = $props();
 	let submitting = $state(false);
+	let turnstileToken = $state('');
+	let turnstileFailed = $state(false);
+	let turnstileContainer = $state<HTMLDivElement | null>(null);
+	let turnstileApi: TurnstileApi | null = null;
+	let turnstileId: string | null = null;
+
+	const needsTurnstile = $derived(!!data.turnstileSiteKey);
+	const canSubmit = $derived(!submitting && (!needsTurnstile || !!turnstileToken));
+
+	// Explicit rendering keeps the challenge working across client-side navigations.
+	onMount(() => {
+		const siteKey = data.turnstileSiteKey;
+		if (!siteKey || !turnstileContainer) return;
+		let cancelled = false;
+		loadTurnstile()
+			.then((api) => {
+				if (cancelled || !turnstileContainer) return;
+				turnstileApi = api;
+				turnstileId = api.render(turnstileContainer, {
+					sitekey: siteKey,
+					appearance: 'interaction-only',
+					size: 'flexible',
+					action: 'login',
+					callback: (token) => (turnstileToken = token),
+					'expired-callback': () => (turnstileToken = ''),
+					'timeout-callback': () => (turnstileToken = ''),
+					'error-callback': () => {
+						turnstileToken = '';
+						turnstileFailed = true;
+						return true;
+					}
+				});
+			})
+			.catch(() => (turnstileFailed = true));
+		return () => {
+			cancelled = true;
+			if (turnstileApi && turnstileId) {
+				try {
+					turnstileApi.remove(turnstileId);
+				} catch {
+					/* already gone */
+				}
+			}
+		};
+	});
+
+	function resetTurnstile() {
+		turnstileToken = '';
+		if (turnstileApi && turnstileId) {
+			try {
+				turnstileApi.reset(turnstileId);
+			} catch {
+				/* ignore */
+			}
+		}
+	}
 </script>
 
 <svelte:head>
@@ -27,6 +85,8 @@
 					return async ({ update }) => {
 						submitting = false;
 						await update();
+						// Turnstile tokens are single-use; a failed attempt needs a fresh one.
+						resetTurnstile();
 					};
 				}}
 			>
@@ -39,10 +99,23 @@
 					<label class="label" for="password">Password</label>
 					<input class="input" id="password" name="password" type="password" autocomplete="current-password" required />
 				</div>
-				<button class="btn btn-primary btn-block" type="submit" disabled={submitting}>
-					{submitting ? 'Signing in…' : 'Sign in'}
+				{#if needsTurnstile}
+					<input type="hidden" name="cf-turnstile-response" value={turnstileToken} />
+					<div class="turnstile" bind:this={turnstileContainer}></div>
+					{#if turnstileFailed}
+						<div class="form-error">The verification challenge could not load. Reload the page and try again.</div>
+					{/if}
+				{/if}
+				<button class="btn btn-primary btn-block" type="submit" disabled={!canSubmit}>
+					{#if submitting}Signing in…{:else if needsTurnstile && !turnstileToken && !turnstileFailed}Verifying…{:else}Sign in{/if}
 				</button>
 			</form>
 		</div>
 	</div>
 </div>
+
+<style>
+	.turnstile:empty {
+		display: none;
+	}
+</style>

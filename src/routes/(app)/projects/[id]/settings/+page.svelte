@@ -2,6 +2,7 @@
 	import { enhance } from '$app/forms';
 	import CopyButton from '$lib/components/CopyButton.svelte';
 	import { basicEmbedSnippet, deploymentEmbedSnippet, programmaticEmbedSnippet } from '$lib/embed';
+	import { timeAgo } from '$lib/format';
 
 	let { data, form } = $props();
 	const project = $derived(data.project);
@@ -13,8 +14,18 @@
 					originsText: project.allowedOrigins.join('\n'),
 					publicFeedbackVisible: project.publicFeedbackVisible,
 					reviewerRepliesEnabled: project.reviewerRepliesEnabled,
-					screenshotsEnabled: project.screenshotsEnabled
+					screenshotsEnabled: project.screenshotsEnabled,
+					anonymousFeedbackAllowed: project.anonymousFeedbackAllowed,
+					openSignups: project.openSignups
 				}
+	);
+	const memberValues = $derived(
+		form?.action === 'createMember' && 'memberValues' in form && form.memberValues
+			? form.memberValues
+			: { name: '', email: '' }
+	);
+	const memberAction = $derived(
+		form?.action === 'addMember' || form?.action === 'createMember' || form?.action === 'removeMember' ? form : null
 	);
 	const basic = $derived(basicEmbedSnippet(data.baseUrl, project.clientKey));
 	const withDeployment = $derived(deploymentEmbedSnippet(data.baseUrl, project.clientKey));
@@ -122,11 +133,102 @@
 					<span class="help" style="display: block">Attach a viewport screenshot to each feedback item. Submission still succeeds if capture fails.</span>
 				</span>
 			</label>
+			<label class="checkbox">
+				<input type="checkbox" name="anonymousFeedbackAllowed" checked={values.anonymousFeedbackAllowed} />
+				<span>
+					<strong>Allow anonymous feedback</strong>
+					<span class="help" style="display: block">
+						Anyone on the site can use the widget without an account. When off, visitors must sign in (or sign up,
+						if enabled below) before the widget opens.
+					</span>
+				</span>
+			</label>
+			<label class="checkbox">
+				<input type="checkbox" name="openSignups" checked={values.openSignups} />
+				<span>
+					<strong>Open for signups</strong>
+					<span class="help" style="display: block">
+						Visitors can create an account from the widget, and any signed-in account joins this project on first
+						use. When off, only members added below (plus owners and admins) can sign in on this project.
+					</span>
+				</span>
+			</label>
 		</div>
 		<div class="card-footer form-actions">
 			<button class="btn btn-primary" type="submit">Save settings</button>
 		</div>
 	</form>
+
+	<div class="card">
+		<div class="card-header">
+			<h2>Members</h2>
+		</div>
+		<div class="card-body stack">
+			<p class="muted small">
+				Members are accounts with the <em>member</em> role that can sign in to the widget on this project. Owners and
+				admins always have access.
+				{#if project.openSignups}
+					This project is open for signups, so accounts also join automatically when they sign in or sign up from the
+					widget.
+				{/if}
+			</p>
+			{#if memberAction?.errors?.length}
+				<div class="form-error">{#each memberAction.errors as error}<div>{error}</div>{/each}</div>
+			{:else if memberAction?.success}
+				<div class="form-success">
+					{#if memberAction.action === 'removeMember'}Member removed.{:else}Member added.{/if}
+				</div>
+			{/if}
+			{#if data.members.length === 0}
+				<p class="muted small">No members yet.</p>
+			{:else}
+				<div class="table-wrap">
+					<table class="table">
+						<thead>
+							<tr><th>Name</th><th>Email</th><th>Added</th><th></th></tr>
+						</thead>
+						<tbody>
+							{#each data.members as member (member.userId)}
+								<tr>
+									<td>{member.name}{#if member.role !== 'member'}<span class="faint"> ({member.role})</span>{/if}</td>
+									<td class="muted">{member.email}</td>
+									<td class="small muted">{timeAgo(member.addedAt)}</td>
+									<td>
+										<form method="POST" action="?/removeMember" use:enhance>
+											<input type="hidden" name="userId" value={member.userId} />
+											<button class="btn btn-sm btn-ghost" type="submit">Remove</button>
+										</form>
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			{/if}
+			<form method="POST" action="?/addMember" class="row" use:enhance>
+				<select class="select" name="userId" required style="flex: 1; min-width: 240px" aria-label="Existing member account">
+					<option value="">{data.candidates.length ? 'Add an existing member account…' : 'No other member accounts to add'}</option>
+					{#each data.candidates as candidate (candidate.id)}
+						<option value={candidate.id}>{candidate.name} ({candidate.email})</option>
+					{/each}
+				</select>
+				<button class="btn" type="submit" disabled={data.candidates.length === 0}>Add</button>
+			</form>
+			<form method="POST" action="?/createMember" class="stack-sm" use:enhance>
+				<strong>Create a member account</strong>
+				<div class="row">
+					<input class="input" name="name" placeholder="Name" required maxlength="120" value={memberValues.name} style="flex: 1; min-width: 140px" />
+					<input class="input" name="email" type="email" placeholder="Email" required value={memberValues.email} style="flex: 1; min-width: 180px" />
+					<input class="input" name="password" type="password" placeholder="Initial password" minlength="10" required autocomplete="new-password" style="flex: 1; min-width: 160px" />
+					<button class="btn" type="submit">Create &amp; add</button>
+				</div>
+				<span class="help">
+					The account gets the member role and is added to this project. Share the password securely; they can change it
+					under Account after signing in at <code class="inline">{data.baseUrl}</code>.
+				</span>
+			</form>
+		</div>
+	</div>
 
 	<div class="card danger">
 		<div class="card-header">

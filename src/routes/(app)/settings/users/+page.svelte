@@ -18,7 +18,10 @@
 	<div class="page-header">
 		<div>
 			<h1>Users</h1>
-			<p class="subtitle">Everyone listed here can sign in to the dashboard and act as an admin in the widget.</p>
+			<p class="subtitle">
+				Owners and admins manage projects here and act as admins in the widget. Members can only sign in to the widget
+				on projects they have been added to (see each project's settings).
+			</p>
 		</div>
 	</div>
 
@@ -42,6 +45,7 @@
 									<form method="POST" action="?/setRole" class="row" use:enhance>
 										<input type="hidden" name="userId" value={user.id} />
 										<select class="select" name="role" onchange={(e) => (e.currentTarget.form as HTMLFormElement).requestSubmit()}>
+											<option value="member" selected={user.role === 'member'}>member</option>
 											<option value="admin" selected={user.role === 'admin'}>admin</option>
 											<option value="owner" selected={user.role === 'owner'}>owner</option>
 										</select>
@@ -92,6 +96,7 @@
 					<select class="select" id="role" name="role">
 						<option value="admin">admin — manage projects and feedback</option>
 						<option value="owner">owner — additionally manage users</option>
+						<option value="member">member — widget access on assigned projects only</option>
 					</select>
 				</div>
 			</div>
