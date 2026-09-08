@@ -1,8 +1,9 @@
 import { json } from '@sveltejs/kit';
 import { api } from '$lib/server/http';
 import { baseUrl } from '$lib/server/base-url';
-import { toViewerDto } from '$lib/server/services/users';
+import { config } from '$lib/server/env';
 import { turnstileSiteKey } from '$lib/server/turnstile';
+import { widgetViewer } from '$lib/server/widget-viewer';
 import type { WidgetConfigDto } from '$lib/shared/types';
 
 /** Always available, even anonymously, so the widget can learn that it must sign in. */
@@ -19,9 +20,10 @@ export const GET = api(async (event) => {
 			anonymousFeedbackAllowed: project.anonymousFeedbackAllowed,
 			openSignups: project.openSignups
 		},
-		viewer: user ? toViewerDto(user) : null,
+		viewer: user ? await widgetViewer(user, project.id) : null,
 		dashboardUrl: baseUrl(event),
-		turnstileSiteKey: turnstileSiteKey()
+		turnstileSiteKey: turnstileSiteKey(),
+		emailEnabled: config.emailEnabled
 	};
 	return json(dto, { headers: { 'Cache-Control': 'no-store' } });
 });

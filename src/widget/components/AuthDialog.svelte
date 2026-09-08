@@ -9,7 +9,9 @@
 	const ui = c.ui;
 	const auth = $derived(ui.auth);
 	const signupAvailable = $derived(!!ui.project?.openSignups);
-	const title = $derived(auth.status === 'form' && auth.mode === 'signup' ? 'Create an account' : 'Sign in');
+	const title = $derived(
+		auth.status === 'verify' ? 'Check your inbox' : auth.status === 'form' && auth.mode === 'signup' ? 'Create an account' : 'Sign in'
+	);
 
 	let name = $state('');
 	let email = $state(c.getAuthor().email);
@@ -19,6 +21,24 @@
 	let turnstileToken = $state<string | null>(null);
 	let turnstileFailed = $state(false);
 	let turnstile = $state<ReturnType<typeof Turnstile> | null>(null);
+	/** Set when sign-in failed because the address is not confirmed yet; offers a resend. */
+	let unverifiedEmail = $state<string | null>(null);
+	let resending = $state(false);
+
+	async function resend(address: string) {
+		resending = true;
+		try {
+			await c.resendVerification(address);
+		} finally {
+			resending = false;
+		}
+	}
+
+	function backToSignIn() {
+		if (ui.verifyEmail) email = ui.verifyEmail;
+		unverifiedEmail = null;
+		c.openSignIn('login');
+	}
 
 	const needsToken = $derived(!!ui.turnstileSiteKey);
 	const canSubmit = $derived(!busy && (!needsToken || !!turnstileToken));
@@ -28,6 +48,7 @@
 		if (!canSubmit) return;
 		busy = true;
 		error = null;
+		unverifiedEmail = null;
 		const token = turnstileToken ?? undefined;
 		try {
 			if (auth.mode === 'signup') {
@@ -38,6 +59,7 @@
 			password = '';
 		} catch (err) {
 			error = err instanceof NotetteApiError ? err.message : 'Could not sign in. Please try again.';
+			if (err instanceof NotetteApiError && err.code === 'email_unverified') unverifiedEmail = email;
 			// Turnstile tokens are single-use; get a fresh one for the next attempt.
 			turnstile?.reset();
 		} finally {
@@ -90,6 +112,11 @@
 				<Turnstile bind:this={turnstile} siteKey={ui.turnstileSiteKey} action={auth.mode} bind:token={turnstileToken} bind:failed={turnstileFailed} />
 			{/if}
 			{#if error}<div class="nt-error">{error}</div>{/if}
+			{#if unverifiedEmail}
+				<button class="link" type="button" onclick={() => resend(unverifiedEmail!)} disabled={resending}>
+					{resending ? 'Sending…' : 'Resend confirmation email'}
+				</button>
+			{/if}
 			<button class="nt-btn nt-btn-primary" type="submit" disabled={!canSubmit}>
 				{#if busy}
 					{auth.mode === 'signup' ? 'Creating account…' : 'Signing in…'}
@@ -109,6 +136,17 @@
 				{/if}
 			{/if}
 			<button class="link" type="button" onclick={() => c.approveFromDashboard()}>Signed in to the Notette dashboard? Approve there</button>
+		</div>
+	{:else if auth.status === 'verify'}
+		<p class="nt-muted">
+			We sent a confirmation link to <strong>{ui.verifyEmail}</strong>. Open it to activate your account, then sign in
+			here with your password.
+		</p>
+		<div class="actions">
+			<button class="nt-btn nt-btn-primary" type="button" onclick={backToSignIn}>I confirmed it, sign in</button>
+			<button class="nt-btn nt-btn-ghost" type="button" onclick={() => resend(ui.verifyEmail)} disabled={resending}>
+				{resending ? 'Sending…' : 'Resend email'}
+			</button>
 		</div>
 	{:else if auth.status === 'waiting'}
 		<p class="nt-muted">Approve the request in the Notette window that just opened. This page will update automatically.</p>
@@ -191,5 +229,9 @@
 	}
 	.link:hover {
 		text-decoration: underline;
+	}
+	.link:disabled {
+		opacity: 0.6;
+		cursor: default;
 	}
 </style>

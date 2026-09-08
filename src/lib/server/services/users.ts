@@ -36,6 +36,8 @@ export async function createUser(input: {
 	name: string;
 	password: string;
 	role: UserRole;
+	/** False for widget sign-ups that must confirm their address first (default true). */
+	verified?: boolean;
 }): Promise<User> {
 	const email = input.email.trim().toLowerCase();
 	if (await getUserByEmail(email)) {
@@ -44,9 +46,19 @@ export async function createUser(input: {
 	const passwordHash = await hashPassword(input.password);
 	const [row] = await db
 		.insert(users)
-		.values({ email, name: input.name.trim(), passwordHash, role: input.role })
+		.values({
+			email,
+			name: input.name.trim(),
+			passwordHash,
+			role: input.role,
+			emailVerifiedAt: input.verified === false ? null : new Date()
+		})
 		.returning();
 	return row;
+}
+
+export async function markEmailVerified(id: string): Promise<void> {
+	await db.update(users).set({ emailVerifiedAt: new Date(), updatedAt: new Date() }).where(eq(users.id, id));
 }
 
 export async function updateUserProfile(id: string, patch: { name?: string; role?: UserRole }): Promise<User | null> {
@@ -70,7 +82,7 @@ export async function deleteUser(id: string): Promise<boolean> {
 
 /** Viewer identity returned to the widget after sign-in or on config load. */
 export function toViewerDto(user: User): WidgetViewerDto {
-	return { admin: isAdminRole(user.role), role: user.role, name: user.name, email: user.email };
+	return { admin: isAdminRole(user.role), role: user.role, name: user.name, email: user.email, emailNotifications: true };
 }
 
 export async function countOwners(): Promise<number> {

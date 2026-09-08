@@ -13,7 +13,7 @@ import {
 } from '$lib/server/db/schema';
 import type { FeedbackCreateInput } from '$lib/server/validation';
 import { isAdminRole, type UserRole } from '$lib/shared/roles';
-import type { FeedbackDetailDto, FeedbackStatus, FeedbackSummaryDto } from '$lib/shared/types';
+import type { FeedbackDetailDto, FeedbackStatus, FeedbackSummaryDto, MentionRef } from '$lib/shared/types';
 import { listComments, toCommentDto, type CommentRow } from './comments';
 import { deleteFilesForFeedback, getScreenshotForFeedback } from './uploads';
 
@@ -69,6 +69,7 @@ function selectColumns() {
 		uploadTokenHash: feedback.uploadTokenHash,
 		deployment: feedback.deployment,
 		metadata: feedback.metadata,
+		mentions: feedback.mentions,
 		resolvedAt: feedback.resolvedAt,
 		resolvedById: feedback.resolvedById,
 		createdAt: feedback.createdAt,
@@ -155,7 +156,7 @@ export async function getFeedbackThread(id: string): Promise<FeedbackThread | nu
 export async function createFeedback(
 	project: Project,
 	input: FeedbackCreateInput,
-	ctx: { user?: User | null; userAgent?: string | null }
+	ctx: { user?: User | null; userAgent?: string | null; mentions?: MentionRef[] | null }
 ): Promise<Feedback> {
 	const pageUrl = new URL(input.page.url);
 	// Signed-in users (admins and members) always post under their account identity.
@@ -200,7 +201,8 @@ export async function createFeedback(
 				elementRelY: input.element?.relY ?? null,
 				userAgent: input.page.userAgent ?? ctx.userAgent?.slice(0, 500) ?? null,
 				deployment: input.deployment && Object.keys(input.deployment).length ? input.deployment : null,
-				metadata: input.metadata && Object.keys(input.metadata).length ? input.metadata : null
+				metadata: input.metadata && Object.keys(input.metadata).length ? input.metadata : null,
+				mentions: ctx.mentions?.length ? ctx.mentions : null
 			})
 			.returning();
 		return row;
@@ -257,7 +259,8 @@ export function toSummaryDto(row: FeedbackRow): FeedbackSummaryDto {
 		elementRect: row.elementRect,
 		elementRelX: row.elementRelX,
 		elementRelY: row.elementRelY,
-		deployment: row.deployment
+		deployment: row.deployment,
+		mentions: (row.mentions ?? []).map((m) => m.name)
 	};
 }
 

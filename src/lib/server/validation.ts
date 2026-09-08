@@ -20,6 +20,9 @@ export const passwordSchema = z
 /** Turnstile response token; only checked server-side when bot protection is configured. */
 const turnstileTokenSchema = z.string().max(TURNSTILE_TOKEN_MAX_LENGTH).optional();
 
+/** Ids of @-mentioned users; filtered against the author's candidates by `resolveMentions()`. */
+const mentionsSchema = z.array(z.string().uuid()).max(20).optional();
+
 const finiteInt = z.number().finite().transform((n) => Math.round(n));
 
 const elementRectSchema = z.object({
@@ -84,7 +87,8 @@ export const feedbackCreateSchema = z.object({
 		.optional(),
 	deployment: deploymentSchema.optional(),
 	metadata: metadataSchema.optional(),
-	turnstileToken: turnstileTokenSchema
+	turnstileToken: turnstileTokenSchema,
+	mentions: mentionsSchema
 });
 
 export type FeedbackCreateInput = z.infer<typeof feedbackCreateSchema>;
@@ -102,7 +106,16 @@ export const commentCreateSchema = z.object({
 				.transform((v) => (v ? v.toLowerCase() : undefined))
 		})
 		.optional(),
-	turnstileToken: turnstileTokenSchema
+	turnstileToken: turnstileTokenSchema,
+	mentions: mentionsSchema
+});
+
+export const notificationPreferencesSchema = z.object({
+	email: z.boolean()
+});
+
+export const resendVerificationSchema = z.object({
+	email: emailSchema
 });
 
 export const widgetLoginSchema = z.object({

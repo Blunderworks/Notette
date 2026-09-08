@@ -71,6 +71,34 @@ export const config = {
 	get turnstileEnabled(): boolean {
 		return !!(this.turnstileSiteKey && this.turnstileSecretKey);
 	},
+	/** Outgoing email (SMTP). Enabled only when both a host and a sender address are set. */
+	get smtpHost(): string | null {
+		return env.SMTP_HOST?.trim() || null;
+	},
+	get smtpPort(): number {
+		return readInt('SMTP_PORT', 587);
+	},
+	/** Implicit TLS (SMTPS). Defaults to on for port 465, otherwise STARTTLS is negotiated when offered. */
+	get smtpSecure(): boolean {
+		return readBool('SMTP_SECURE', this.smtpPort === 465);
+	},
+	get smtpUser(): string | null {
+		return env.SMTP_USER?.trim() || null;
+	},
+	get smtpPassword(): string | null {
+		return env.SMTP_PASSWORD || null;
+	},
+	/** Sender, e.g. `Notette <feedback@example.com>`. */
+	get emailFrom(): string | null {
+		return env.EMAIL_FROM?.trim() || null;
+	},
+	get emailEnabled(): boolean {
+		return !!(this.smtpHost && this.emailFrom);
+	},
+	/** How long to collect activity for one recipient before sending a single digest email. */
+	get emailBatchSeconds(): number {
+		return readInt('NOTETTE_EMAIL_BATCH_SECONDS', 60);
+	},
 	get isProduction(): boolean {
 		return (env.NODE_ENV ?? 'development') === 'production';
 	}

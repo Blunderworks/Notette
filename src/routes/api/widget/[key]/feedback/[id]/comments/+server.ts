@@ -2,6 +2,8 @@ import { json } from '@sveltejs/kit';
 import { adminUser, ApiError, api, clientAddress, readJson } from '$lib/server/http';
 import { rateLimit } from '$lib/server/rate-limit';
 import { addComment, toCommentDto } from '$lib/server/services/comments';
+import { resolveMentions } from '$lib/server/services/mentions';
+import { queueCommentNotifications } from '$lib/server/services/notifications';
 import { requireTurnstile } from '$lib/server/turnstile';
 import { commentCreateSchema } from '$lib/server/validation';
 import { loadWidgetThread } from '$lib/server/widget-thread';
@@ -27,13 +29,16 @@ export const POST = api(async (event) => {
 	const input = await readJson(event.request, commentCreateSchema, 50_000);
 	if (!user) await requireTurnstile(event, input.turnstileToken);
 
+	const mentions = await resolveMentions(user, project.id, input.mentions);
 	const comment = await addComment({
 		feedbackId: thread.item.id,
 		body: input.body,
 		authorName: user ? user.name : (input.author?.name ?? null),
 		authorEmail: user ? user.email : (input.author?.email ?? null),
 		userId: user?.id ?? null,
-		authorRole: user?.role ?? null
+		authorRole: user?.role ?? null,
+		mentions
 	});
+	await queueCommentNotifications(thread, comment, user);
 	return json(toCommentDto(comment), { status: 201 });
 });

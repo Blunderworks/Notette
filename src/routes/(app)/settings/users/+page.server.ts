@@ -1,6 +1,14 @@
 import { fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
-import { countOwners, createUser, deleteUser, getUserById, listUsers, updateUserProfile } from '$lib/server/services/users';
+import {
+	countOwners,
+	createUser,
+	deleteUser,
+	getUserById,
+	listUsers,
+	markEmailVerified,
+	updateUserProfile
+} from '$lib/server/services/users';
 import { emailSchema, passwordSchema } from '$lib/server/validation';
 import { ApiError } from '$lib/server/http';
 import { isUserRole, type UserRole } from '$lib/shared/roles';
@@ -19,6 +27,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 			email: u.email,
 			name: u.name,
 			role: u.role,
+			verified: !!u.emailVerifiedAt,
 			createdAt: u.createdAt.toISOString(),
 			isSelf: u.id === locals.user!.id
 		}))
@@ -70,6 +79,17 @@ export const actions: Actions = {
 		}
 		await updateUserProfile(id, { role });
 		return { action: 'setRole', success: true };
+	},
+	/** Lets an owner activate a widget sign-up whose confirmation email never arrived. */
+	verify: async ({ request, locals }) => {
+		const denied = requireOwner(locals);
+		if (denied) return denied;
+		const form = await request.formData();
+		const id = String(form.get('userId') ?? '');
+		const target = await getUserById(id);
+		if (!target) return fail(404, { action: 'verify', error: 'User not found.' });
+		await markEmailVerified(id);
+		return { action: 'verify', success: true };
 	},
 	delete: async ({ request, locals }) => {
 		const denied = requireOwner(locals);

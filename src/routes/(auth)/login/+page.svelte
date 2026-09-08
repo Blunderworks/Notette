@@ -77,8 +77,18 @@
 			{#if form?.error}
 				<div class="form-error">{form.error}</div>
 			{/if}
+			{#if form?.resent}
+				<div class="form-success">If that account still needs confirmation, a new link is on its way to {form.email}.</div>
+			{/if}
+			{#if form?.unverified}
+				<form method="POST" action="?/resend" class="row" use:enhance>
+					<input type="hidden" name="email" value={form.email ?? ''} />
+					<button class="btn btn-sm" type="submit">Resend confirmation email</button>
+				</form>
+			{/if}
 			<form
 				method="POST"
+				action="?/login"
 				class="stack"
 				use:enhance={() => {
 					submitting = true;

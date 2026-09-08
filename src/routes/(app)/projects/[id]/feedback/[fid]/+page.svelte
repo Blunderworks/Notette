@@ -1,9 +1,12 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import CopyButton from '$lib/components/CopyButton.svelte';
+	import MentionText from '$lib/components/MentionText.svelte';
+	import MentionTextarea from '$lib/components/MentionTextarea.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import { formatDateTime, siteLinkForFeedback, timeAgo } from '$lib/format';
 	import { formatFeedbackForAgent } from '$lib/shared/agent-format';
+	import type { MentionRef } from '$lib/shared/types';
 
 	let { data, form } = $props();
 	const item = $derived(data.item);
@@ -13,6 +16,7 @@
 	const attributeEntries = $derived(Object.entries(item.elementAttributes ?? {}));
 	const deploymentEntries = $derived(Object.entries(item.deployment ?? {}).filter(([, v]) => v));
 	let replyBody = $state('');
+	let replyMentions = $state<MentionRef[]>([]);
 </script>
 
 <svelte:head>
@@ -66,7 +70,7 @@
 						{#if item.isAdmin}<span class="badge admin">admin</span>{:else if item.isMember}<span class="badge member">member</span>{/if}
 						<span title={item.createdAt}>{formatDateTime(item.createdAt)}</span>
 					</div>
-					<div class="comment-body">{item.body}</div>
+					<div class="comment-body"><MentionText text={item.body} mentions={item.mentions} /></div>
 				</div>
 				{#each data.comments as comment (comment.id)}
 					<div class="comment">
@@ -79,7 +83,7 @@
 								<button class="btn btn-ghost btn-sm" type="submit">Delete</button>
 							</form>
 						</div>
-						<div class="comment-body">{comment.body}</div>
+						<div class="comment-body"><MentionText text={comment.body} mentions={comment.mentions} /></div>
 					</div>
 				{/each}
 			</div>
@@ -90,13 +94,30 @@
 				class="card"
 				use:enhance={() =>
 					async ({ result, update }) => {
-						if (result.type === 'success') replyBody = '';
+						if (result.type === 'success') {
+							replyBody = '';
+							replyMentions = [];
+						}
 						await update();
 					}}
 			>
 				<div class="card-body stack-sm">
 					<label class="label" for="reply">Reply as {data.user?.name}</label>
-					<textarea class="textarea" id="reply" name="body" required maxlength="5000" bind:value={replyBody} placeholder="Write a reply…"></textarea>
+					<MentionTextarea
+						class="textarea"
+						id="reply"
+						name="body"
+						required
+						maxlength={5000}
+						bind:value={replyBody}
+						bind:mentions={replyMentions}
+						candidates={data.mentionCandidates}
+						placeholder={data.mentionCandidates.length ? 'Write a reply… type @ to mention someone' : 'Write a reply…'}
+					/>
+					<input type="hidden" name="mentions" value={replyMentions.map((m) => m.id).join(',')} />
+					{#if data.mentionCandidates.length}
+						<span class="help">Type @ to mention a project member or another admin; mentioned people are emailed when notifications are enabled.</span>
+					{/if}
 				</div>
 				<div class="card-footer form-actions">
 					<button class="btn btn-primary" type="submit">Post reply</button>

@@ -4,6 +4,9 @@ import { baseUrl } from '$lib/server/base-url';
 import { isUuid } from '$lib/server/ids';
 import { addComment, deleteComment } from '$lib/server/services/comments';
 import { deleteFeedback, getFeedbackThread, setFeedbackStatus, toDetailDto } from '$lib/server/services/feedback';
+import { listMentionCandidates, resolveMentions } from '$lib/server/services/mentions';
+import { queueCommentNotifications } from '$lib/server/services/notifications';
+import { parseMentionIds } from '$lib/shared/mentions';
 import { isAdminRole } from '$lib/shared/roles';
 
 async function loadThread(projectId: string, feedbackId: string) {
@@ -14,7 +17,10 @@ async function loadThread(projectId: string, feedbackId: string) {
 }
 
 export const load: PageServerLoad = async (event) => {
-	const thread = await loadThread(event.params.id, event.params.fid);
+	const [thread, mentionCandidates] = await Promise.all([
+		loadThread(event.params.id, event.params.fid),
+		listMentionCandidates(event.locals.user!, event.params.id)
+	]);
 	return {
 		item: toDetailDto(thread, baseUrl(event), { includeEmail: true }),
 		comments: thread.comments.map((c) => ({
@@ -24,8 +30,10 @@ export const load: PageServerLoad = async (event) => {
 			authorEmail: c.authorEmail,
 			isAdmin: isAdminRole(c.authorRole),
 			isMember: c.authorRole === 'member',
+			mentions: (c.mentions ?? []).map((m) => m.name),
 			createdAt: c.createdAt.toISOString()
-		}))
+		})),
+		mentionCandidates
 	};
 };
 
@@ -37,14 +45,17 @@ export const actions: Actions = {
 		if (!body) return fail(400, { action: 'reply', error: 'Reply cannot be empty.' });
 		if (body.length > 5000) return fail(400, { action: 'reply', error: 'Reply is too long (max 5000 characters).' });
 		const user = locals.user!;
-		await addComment({
+		const mentions = await resolveMentions(user, params.id, parseMentionIds(String(form.get('mentions') ?? '')));
+		const comment = await addComment({
 			feedbackId: thread.item.id,
 			body,
 			authorName: user.name,
 			authorEmail: user.email,
 			userId: user.id,
-			authorRole: user.role
+			authorRole: user.role,
+			mentions
 		});
+		await queueCommentNotifications(thread, comment, user);
 		return { action: 'reply', success: true };
 	},
 	setStatus: async ({ request, params, locals }) => {

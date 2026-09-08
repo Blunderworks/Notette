@@ -12,12 +12,13 @@ import {
 	uniqueIndex,
 	uuid
 } from 'drizzle-orm/pg-core';
-import type { DeploymentInfo, ElementRect } from '$lib/shared/types';
+import type { DeploymentInfo, ElementRect, MentionRef } from '$lib/shared/types';
 
 export const userRole = pgEnum('user_role', ['owner', 'admin', 'member']);
 export const sessionKind = pgEnum('session_kind', ['dashboard', 'widget']);
 export const feedbackStatus = pgEnum('feedback_status', ['open', 'resolved']);
 export const authRequestStatus = pgEnum('auth_request_status', ['pending', 'approved', 'denied']);
+export const notificationKind = pgEnum('notification_kind', ['feedback', 'comment', 'mention']);
 
 const timestamps = {
 	createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -32,6 +33,12 @@ export const users = pgTable(
 		name: text('name').notNull(),
 		passwordHash: text('password_hash').notNull(),
 		role: userRole('role').notNull().default('admin'),
+		/**
+		 * When the address was confirmed. Null only for widget sign-ups on projects
+		 * that require verification; such accounts cannot sign in until verified.
+		 * Defaults to now() so admin-created and pre-existing accounts count as verified.
+		 */
+		emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }).defaultNow(),
 		...timestamps
 	},
 	(t) => [uniqueIndex('users_email_idx').on(t.email)]
@@ -61,6 +68,11 @@ export const projects = pgTable(
 		 * added in the dashboard (plus admins) can access the project.
 		 */
 		openSignups: boolean('open_signups').notNull().default(false),
+		/**
+		 * Widget sign-ups must confirm their email address before they can sign in.
+		 * Only effective when email is configured (see `config.emailEnabled`).
+		 */
+		emailVerificationRequired: boolean('email_verification_required').notNull().default(false),
 		feedbackSeq: integer('feedback_seq').notNull().default(0),
 		...timestamps
 	},
@@ -169,6 +181,8 @@ export const feedback = pgTable(
 		uploadTokenHash: text('upload_token_hash'),
 		deployment: jsonb('deployment').$type<DeploymentInfo>(),
 		metadata: jsonb('metadata').$type<Record<string, unknown>>(),
+		/** Users @-mentioned in the body (validated against the author's mention candidates). */
+		mentions: jsonb('mentions').$type<MentionRef[]>(),
 
 		resolvedAt: timestamp('resolved_at', { withTimezone: true }),
 		resolvedById: uuid('resolved_by_id').references(() => users.id, { onDelete: 'set null' }),
@@ -193,6 +207,8 @@ export const comments = pgTable(
 		authorName: text('author_name'),
 		authorEmail: text('author_email'),
 		userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+		/** Users @-mentioned in the reply. */
+		mentions: jsonb('mentions').$type<MentionRef[]>(),
 		...timestamps
 	},
 	(t) => [index('comments_feedback_idx').on(t.feedbackId)]
@@ -217,6 +233,69 @@ export const uploads = pgTable(
 	(t) => [index('uploads_feedback_idx').on(t.feedbackId)]
 );
 
+/** One-time email verification links (token stored hashed). */
+export const emailVerifications = pgTable(
+	'email_verifications',
+	{
+		/** SHA-256 hex digest of the raw token in the link. */
+		tokenHash: text('token_hash').primaryKey(),
+		userId: uuid('user_id')
+			.notNull()
+			.references(() => users.id, { onDelete: 'cascade' }),
+		/** Site origin the sign-up came from, so the confirmation page can link back. */
+		origin: text('origin'),
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+		expiresAt: timestamp('expires_at', { withTimezone: true }).notNull()
+	},
+	(t) => [index('email_verifications_user_idx').on(t.userId)]
+);
+
+/** A row means the user turned email notifications off for that project. */
+export const notificationMutes = pgTable(
+	'notification_mutes',
+	{
+		userId: uuid('user_id')
+			.notNull()
+			.references(() => users.id, { onDelete: 'cascade' }),
+		projectId: uuid('project_id')
+			.notNull()
+			.references(() => projects.id, { onDelete: 'cascade' }),
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+	},
+	(t) => [primaryKey({ columns: [t.userId, t.projectId] })]
+);
+
+/**
+ * Outbox for email notifications. Rows are grouped per recipient and sent as
+ * one digest once the oldest pending row is older than the batch delay.
+ */
+export const notifications = pgTable(
+	'notifications',
+	{
+		id: uuid('id').primaryKey().defaultRandom(),
+		userId: uuid('user_id')
+			.notNull()
+			.references(() => users.id, { onDelete: 'cascade' }),
+		projectId: uuid('project_id')
+			.notNull()
+			.references(() => projects.id, { onDelete: 'cascade' }),
+		feedbackId: uuid('feedback_id')
+			.notNull()
+			.references(() => feedback.id, { onDelete: 'cascade' }),
+		/** Null for new-feedback notifications (the thread root itself). */
+		commentId: uuid('comment_id').references(() => comments.id, { onDelete: 'cascade' }),
+		kind: notificationKind('kind').notNull(),
+		/** Delivery attempts so far; rows past the limit are abandoned. */
+		attempts: integer('attempts').notNull().default(0),
+		/** Set after a failed attempt so retries back off instead of running every tick. */
+		nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }),
+		lastError: text('last_error'),
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+		sentAt: timestamp('sent_at', { withTimezone: true })
+	},
+	(t) => [index('notifications_pending_idx').on(t.sentAt, t.userId), index('notifications_feedback_idx').on(t.feedbackId)]
+);
+
 export type User = typeof users.$inferSelect;
 export type Project = typeof projects.$inferSelect;
 export type ProjectMember = typeof projectMembers.$inferSelect;
@@ -226,3 +305,6 @@ export type Feedback = typeof feedback.$inferSelect;
 export type NewFeedback = typeof feedback.$inferInsert;
 export type Comment = typeof comments.$inferSelect;
 export type Upload = typeof uploads.$inferSelect;
+export type EmailVerification = typeof emailVerifications.$inferSelect;
+export type NotificationRow = typeof notifications.$inferSelect;
+export type NotificationKind = NotificationRow['kind'];

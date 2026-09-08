@@ -7,6 +7,7 @@ Self-hosted, framework-agnostic preview feedback. Drop one `<script>` tag into a
 - **Threads**: replies, open/resolved status, admin badges.
 - **On-site admin**: sign in from the widget (inline email/password, or approve from the dashboard; no third-party cookies), resolve/reopen/delete, browse feedback across all pages of a project and jump straight to each pin.
 - **Access control**: allow anonymous feedback, or require an account. Member accounts can be assigned to specific projects, or a project can be opened for self-service signups from the widget. Optional Cloudflare Turnstile protects anonymous submissions and sign-in/sign-up.
+- **Notifications and mentions** (optional, needs SMTP): admins and thread participants get a nicely formatted email about new feedback, replies and @-mentions, grouped per recipient and sent about a minute after the first update, with a link that opens the thread on the site. Everyone can turn it off per project; projects can require sign-ups to confirm their email address.
 - **Dashboard**: cross-project overview, search/filter, thread view with full context, project settings and embed snippet, users and sessions.
 - **Copy for Agent**: one click copies the feedback with page, DOM, deployment and screenshot context as concise Markdown for a coding agent.
 
@@ -65,6 +66,9 @@ Configuration is entirely through environment variables (see `.env.example`):
 | `NOTETTE_AUTO_MIGRATE` | `true` | Apply migrations at startup |
 | `ADDRESS_HEADER` / `XFF_DEPTH` | — | Set `ADDRESS_HEADER=x-forwarded-for` behind a reverse proxy so rate limiting sees real client IPs |
 | `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` | — | Optional Cloudflare Turnstile keys. When both are set, anonymous feedback and replies, widget sign-in/sign-up and the dashboard login require a challenge; unset means no bot protection |
+| `SMTP_HOST` / `EMAIL_FROM` | — | Optional outgoing email. When both are set, email notifications and email verification become available; unset means no email is ever sent |
+| `SMTP_PORT` / `SMTP_SECURE` / `SMTP_USER` / `SMTP_PASSWORD` | `587` / auto / — / — | SMTP details. `SMTP_SECURE=true` uses implicit TLS (default for port 465); otherwise STARTTLS is used when the server offers it. User/password are optional for relays without authentication |
+| `NOTETTE_EMAIL_BATCH_SECONDS` | `60` | How long activity is collected per recipient before one digest email goes out |
 | `PORT` / `HOST` / `BODY_SIZE_LIMIT` | `3000` / `0.0.0.0` / `12M` | Node server settings |
 
 Put a TLS-terminating reverse proxy (Caddy, nginx, Traefik) in front of port 3000 and set `NOTETTE_URL` to the public HTTPS URL. The container derives `ORIGIN` from `NOTETTE_URL` automatically. Health check: `GET /api/health`.
@@ -99,6 +103,8 @@ docker compose up -d
 - **First admin**: `/setup` is available only while no users exist; alternatively set `NOTETTE_ADMIN_EMAIL` and `NOTETTE_ADMIN_PASSWORD`.
 - **Users and roles**: *Settings → Users*. Owners can add/remove users and change roles; admins can do everything else (manage projects, triage feedback, act as admin in the widget). **Members** are regular accounts for reviewers: they can only sign in to the widget on projects they belong to (added under the project's settings, or by signing up on a project that is open for signups) and see a minimal dashboard with their projects and account page. Admins can also create member accounts directly from a project's *Members* card.
 - **Bot protection**: set `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` (Cloudflare Turnstile, free) to require a challenge for anonymous feedback and replies, widget sign-in/sign-up and the dashboard login. Without the keys nothing changes. Sites embedding the widget must allow `https://challenges.cloudflare.com` in `script-src` and `frame-src` if they set a Content Security Policy.
+- **Email notifications**: set `SMTP_HOST` and `EMAIL_FROM` (see the table above). Owners and admins are emailed about every new feedback item and reply; signed-in members are emailed about replies in threads they took part in and whenever someone @-mentions them. Updates are grouped per person and sent as one email about a minute after the first one, each with an *Open on site* link that opens the thread in the widget (admins also get a dashboard link). Anyone can turn emails off per project: admins under *Project settings → Your notifications*, everyone from the account menu in the widget (click the avatar). Unconfirmed accounts are never emailed.
+- **Email verification**: with email configured, a project can *Require email verification for signups*. Accounts created from the widget then receive a confirmation link (valid 24 hours) and cannot sign in until they open it; the sign-in forms offer *Resend confirmation email*, and owners can *Mark verified* on the Users page if a message never arrives. Accounts created by admins are always verified.
 - **Password reset** when locked out: `docker compose exec app node scripts/reset-password.mjs you@example.com 'new-password'` (creates the account if it does not exist).
 - **Sessions**: *Settings → Account* lists dashboard and widget sessions with the site origin each widget token was issued to, and lets you revoke them. Changing your password signs out all other sessions.
 - **Security defaults**: scrypt password hashing, httpOnly SameSite cookies, CSRF-protected forms, CSP on dashboard pages, per-project origin allow-lists, bearer tokens bound to one project and origin, rate limiting on submissions and sign-in, screenshot uploads authorised by a one-time token, magic-byte validation of images.
@@ -112,6 +118,8 @@ docker compose up -d
    - *Capture screenshots*.
    - *Allow anonymous feedback* (default on) — anyone on the site can use the widget. Turn it off to require an account: the widget then opens a small sign-in form instead of the toolbar.
    - *Open for signups* (default off) — visitors can create a member account from the widget, and any signed-in account joins the project on first use. When off, only members listed in the project's *Members* card (plus owners and admins) can sign in on that project.
+   - *Require email verification for signups* (default off, needs SMTP) — widget sign-ups must confirm their email address before they can sign in.
+   - *Your notifications* (needs SMTP) — your personal switch for email notifications about this project.
 3. **Members**: the *Members* card on the settings page lists who has access, lets you add existing member accounts or create new ones, and remove them (removal also revokes their widget sessions for that project).
 4. The **client key** (`ntk_…`) is a public identifier, not a secret; the origin allow-list is what protects the API. Regenerate it from the settings page if needed.
 
@@ -150,9 +158,10 @@ The `window.Notette` API also offers `open()`, `close()`, `comment()` (start pic
 Using it:
 
 - Reviewers click the launcher, choose **Comment**, click any element, and write the note. The widget records the element and page context, captures a screenshot (if enabled) and submits. Pins show existing feedback; clicking one opens the thread.
-- On projects that do not allow anonymous feedback, clicking the launcher opens a small **sign-in** form instead (with a **create account** option when the project is open for signups). Members post under their account name; admins get the full toolbar.
+- On projects that do not allow anonymous feedback, clicking the launcher opens a small **sign-in** form instead (with a **create account** option when the project is open for signups; if the project requires email verification the widget asks the new user to open the emailed link first). Members post under their account name; admins get the full toolbar. Clicking the avatar opens the account menu with the email notification switch and sign out.
 - Admins and members can also choose **Sign in** in the launcher at any time. The form signs in with the Notette email and password directly; alternatively, *Approve from the Notette dashboard* opens a Notette window that asks to approve access for that site and the widget polls for the approval (works across origins, with popup blockers and on COOP-isolated pages). Either way the resulting token lives only in that site's `localStorage` and is bound to that project and origin. Admins can resolve, reopen, delete, and use **List → All pages** to browse the whole project; selecting an item navigates to its page and highlights the pin.
 - Deep links: append `?notette=<feedback id>` to a page URL (the dashboard's *Open on site* button does this) to focus a specific item on load.
+- **Mentions**: signed-in users can type `@` in a comment or reply to mention someone. Admins can mention project members and other admins/owners; members can mention people on the same project. Mentioned people are emailed (when notifications are configured and enabled) and the name is highlighted in the thread.
 - **Copy for Agent** (widget thread header or dashboard detail page) copies the item plus its context as Markdown.
 
 Pins are re-anchored to the original element by CSS selector, falling back to XPath, and finally to the recorded page coordinates (shown as a dashed "approximate" pin) when the element no longer exists.

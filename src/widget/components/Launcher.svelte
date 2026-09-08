@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
 	import type { WidgetController } from '../lib/controller.svelte';
+	import AccountMenu from './AccountMenu.svelte';
 	import Icon from './Icon.svelte';
 
 	const c = getContext<WidgetController>('notette');
@@ -18,6 +19,9 @@
 </script>
 
 <div class="launcher" class:left={c.config.position === 'bottom-left'}>
+	{#if ui.expanded && ui.accountMenuOpen && ui.viewer}
+		<AccountMenu />
+	{/if}
 	{#if ui.expanded}
 		<div class="toolbar nt-card" role="toolbar" aria-label="Notette feedback">
 			<button
@@ -60,8 +64,10 @@
 					class="avatar"
 					class:member={!ui.viewer.admin}
 					type="button"
-					onclick={() => c.signOut()}
-					title="Signed in as {ui.viewer.name}{ui.viewer.admin ? '' : ' (member)'} · click to sign out"
+					onclick={() => c.toggleAccountMenu()}
+					aria-expanded={ui.accountMenuOpen}
+					aria-haspopup="dialog"
+					title="Signed in as {ui.viewer.name}{ui.viewer.admin ? '' : ' (member)'}"
 				>
 					{initials}
 				</button>

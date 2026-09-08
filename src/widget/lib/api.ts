@@ -1,15 +1,19 @@
 import type {
 	ApiErrorDto,
 	AuthRequestPollDto,
+	CommentCreatePayload,
 	CommentDto,
 	FeedbackCreatePayload,
 	FeedbackDetailDto,
 	FeedbackListDto,
 	FeedbackStatus,
+	MentionCandidateDto,
+	NotificationPreferencesDto,
 	WidgetAuthResultDto,
 	WidgetConfigDto,
 	WidgetLoginPayload,
-	WidgetSignupPayload
+	WidgetSignupPayload,
+	WidgetSignupResultDto
 } from '$lib/shared/types';
 
 export class NotetteApiError extends Error {
@@ -133,12 +137,26 @@ export class ApiClient {
 		id: string,
 		body: string,
 		author?: { name?: string; email?: string },
-		turnstileToken?: string
+		turnstileToken?: string,
+		mentions?: string[]
 	): Promise<CommentDto> {
-		return this.request(`/feedback/${encodeURIComponent(id)}/comments`, {
-			method: 'POST',
-			body: { body, author, turnstileToken }
-		});
+		const payload: CommentCreatePayload = { body, author, turnstileToken, mentions };
+		return this.request(`/feedback/${encodeURIComponent(id)}/comments`, { method: 'POST', body: payload });
+	}
+
+	/** People the signed-in viewer may @-mention on this project. */
+	getMentionCandidates(): Promise<{ users: MentionCandidateDto[] }> {
+		return this.request('/mentions');
+	}
+
+	/** Turns email notifications for this project on or off for the signed-in viewer. */
+	setNotifications(email: boolean): Promise<NotificationPreferencesDto> {
+		return this.request('/notifications', { method: 'PUT', body: { email } });
+	}
+
+	/** Asks for a new confirmation link (no-op for unknown or verified addresses). */
+	resendVerification(email: string): Promise<{ ok: boolean }> {
+		return this.request('/auth/verify/resend', { method: 'POST', body: { email } });
 	}
 
 	setStatus(id: string, status: FeedbackStatus): Promise<FeedbackDetailDto> {
@@ -166,8 +184,8 @@ export class ApiClient {
 		return this.request('/auth/login', { method: 'POST', body: payload });
 	}
 
-	/** Inline sign-up (projects open for signups only). */
-	signup(payload: WidgetSignupPayload): Promise<WidgetAuthResultDto> {
+	/** Inline sign-up (projects open for signups only); may answer with a pending verification instead of a token. */
+	signup(payload: WidgetSignupPayload): Promise<WidgetSignupResultDto> {
 		return this.request('/auth/signup', { method: 'POST', body: payload });
 	}
 

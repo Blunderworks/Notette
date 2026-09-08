@@ -3,6 +3,8 @@
 	import { NotetteApiError } from '../lib/api';
 	import type { WidgetController } from '../lib/controller.svelte';
 	import { placeNear } from '../lib/position';
+	import MentionTextarea from '$lib/components/MentionTextarea.svelte';
+	import type { MentionRef } from '$lib/shared/types';
 	import Icon from './Icon.svelte';
 	import Turnstile from './Turnstile.svelte';
 
@@ -18,7 +20,8 @@
 	let submitting = $state(false);
 	let stage = $state<'idle' | 'capturing' | 'sending'>('idle');
 	let error = $state<string | null>(null);
-	let textarea = $state<HTMLTextAreaElement | null>(null);
+	let input = $state<MentionTextarea | null>(null);
+	let mentions = $state<MentionRef[]>([]);
 	let height = $state(0);
 	let tick = $state(0);
 	let turnstileToken = $state<string | null>(null);
@@ -29,7 +32,7 @@
 	const canSend = $derived(!submitting && !!body.trim() && (!c.needsTurnstile || !!turnstileToken));
 
 	$effect(() => {
-		textarea?.focus();
+		input?.focus();
 	});
 
 	$effect(() => {
@@ -55,7 +58,7 @@
 		error = null;
 		stage = includeScreenshot && ui.project?.screenshotsEnabled ? 'capturing' : 'sending';
 		try {
-			await c.submitFeedback({ target, body, author: { name, email }, screenshot: includeScreenshot, turnstileToken });
+			await c.submitFeedback({ target, body, author: { name, email }, screenshot: includeScreenshot, turnstileToken, mentions });
 		} catch (err) {
 			error = err instanceof NotetteApiError ? err.message : 'Could not send feedback. Please try again.';
 			// The token was consumed by the failed attempt; request a new one.
@@ -92,17 +95,20 @@
 			<Icon name="close" />
 		</button>
 	</div>
-	<textarea
-		class="nt-textarea"
-		bind:this={textarea}
+	<MentionTextarea
+		bind:this={input}
 		bind:value={body}
+		bind:mentions
+		candidates={ui.mentionCandidates}
+		class="nt-textarea"
+		placement="up"
 		onkeydown={onKeydown}
-		placeholder="What should change here?"
-		maxlength="5000"
-		rows="3"
+		placeholder={ui.mentionCandidates.length ? 'What should change here? Type @ to mention someone' : 'What should change here?'}
+		maxlength={5000}
+		rows={3}
 		required
 		disabled={submitting}
-	></textarea>
+	/>
 	{#if !ui.viewer && !c.config.user?.name}
 		<div class="identity">
 			<input class="nt-input" type="text" bind:value={name} placeholder="Your name (optional)" maxlength="120" disabled={submitting} />

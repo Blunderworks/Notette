@@ -16,6 +16,20 @@ export interface ElementRect {
 	height: number;
 }
 
+/** A user referenced with @Name in a feedback body or reply. */
+export interface MentionRef {
+	id: string;
+	name: string;
+}
+
+/** Someone the current user may @-mention (see *Mentions* in ARCHITECTURE.md). */
+export interface MentionCandidateDto {
+	id: string;
+	name: string;
+	/** Owner or admin account. */
+	admin: boolean;
+}
+
 export interface DeploymentInfo {
 	environment?: string;
 	branch?: string;
@@ -33,6 +47,8 @@ export interface FeedbackCreatePayload {
 	};
 	/** Cloudflare Turnstile response, required for anonymous submissions when configured. */
 	turnstileToken?: string;
+	/** Ids of @-mentioned users (signed-in authors only; validated server-side). */
+	mentions?: string[];
 	page: {
 		url: string;
 		title?: string;
@@ -70,6 +86,8 @@ export interface CommentDto {
 	isAdmin: boolean;
 	/** Posted by a signed-in member (non-admin account). */
 	isMember: boolean;
+	/** Display names of @-mentioned users, for highlighting in the body. */
+	mentions: string[];
 	createdAt: string;
 }
 
@@ -105,6 +123,8 @@ export interface FeedbackSummaryDto {
 	elementRelX: number | null;
 	elementRelY: number | null;
 	deployment: DeploymentInfo | null;
+	/** Display names of @-mentioned users, for highlighting in the body. */
+	mentions: string[];
 }
 
 export interface FeedbackDetailDto extends FeedbackSummaryDto {
@@ -128,6 +148,8 @@ export interface WidgetViewerDto {
 	role: UserRole;
 	name: string;
 	email: string;
+	/** Email notifications for this project are on (only meaningful when the server can send email). */
+	emailNotifications: boolean;
 }
 
 export interface WidgetConfigDto {
@@ -147,6 +169,8 @@ export interface WidgetConfigDto {
 	dashboardUrl: string;
 	/** Cloudflare Turnstile site key when bot protection is configured, otherwise null. */
 	turnstileSiteKey: string | null;
+	/** The server can send email, so notification preferences and verification apply. */
+	emailEnabled: boolean;
 }
 
 export interface AuthRequestPollDto {
@@ -170,10 +194,31 @@ export interface WidgetSignupPayload {
 	turnstileToken?: string;
 }
 
-/** Response of both widget sign-in and sign-up. */
+/** Response of widget sign-in, and of sign-up when no verification is needed. */
 export interface WidgetAuthResultDto {
 	token: string;
 	viewer: WidgetViewerDto;
+}
+
+/** Sign-up response when the project requires email verification first. */
+export interface WidgetSignupPendingDto {
+	verificationRequired: true;
+	email: string;
+}
+
+export type WidgetSignupResultDto = WidgetAuthResultDto | WidgetSignupPendingDto;
+
+/** Payload for the widget's reply form. */
+export interface CommentCreatePayload {
+	body: string;
+	author?: { name?: string; email?: string };
+	turnstileToken?: string;
+	mentions?: string[];
+}
+
+export interface NotificationPreferencesDto {
+	/** Email digests for this project. */
+	email: boolean;
 }
 
 export interface ApiErrorDto {

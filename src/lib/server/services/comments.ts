@@ -2,7 +2,7 @@ import { asc, eq, getTableColumns } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { comments, feedback, users, type Comment } from '$lib/server/db/schema';
 import { isAdminRole, type UserRole } from '$lib/shared/roles';
-import type { CommentDto } from '$lib/shared/types';
+import type { CommentDto, MentionRef } from '$lib/shared/types';
 
 /** A comment plus the current role of its author (null for anonymous or deleted accounts). */
 export interface CommentRow extends Comment {
@@ -25,6 +25,8 @@ export async function addComment(input: {
 	authorEmail?: string | null;
 	userId?: string | null;
 	authorRole?: UserRole | null;
+	/** Already validated with `resolveMentions()`. */
+	mentions?: MentionRef[] | null;
 }): Promise<CommentRow> {
 	return db.transaction(async (tx) => {
 		const [row] = await tx
@@ -34,7 +36,8 @@ export async function addComment(input: {
 				body: input.body,
 				authorName: input.authorName ?? null,
 				authorEmail: input.authorEmail ?? null,
-				userId: input.userId ?? null
+				userId: input.userId ?? null,
+				mentions: input.mentions?.length ? input.mentions : null
 			})
 			.returning();
 		await tx.update(feedback).set({ updatedAt: new Date() }).where(eq(feedback.id, input.feedbackId));
@@ -54,6 +57,7 @@ export function toCommentDto(c: CommentRow): CommentDto {
 		authorName: c.authorName,
 		isAdmin: isAdminRole(c.authorRole),
 		isMember: c.authorRole === 'member',
+		mentions: (c.mentions ?? []).map((m) => m.name),
 		createdAt: c.createdAt.toISOString()
 	};
 }

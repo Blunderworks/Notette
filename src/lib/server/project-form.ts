@@ -29,7 +29,8 @@ export function parseProjectForm(form: FormData): ProjectFormResult {
 			reviewerRepliesEnabled: form.get('reviewerRepliesEnabled') === 'on',
 			screenshotsEnabled: form.get('screenshotsEnabled') === 'on',
 			anonymousFeedbackAllowed: form.get('anonymousFeedbackAllowed') === 'on',
-			openSignups: form.get('openSignups') === 'on'
+			openSignups: form.get('openSignups') === 'on',
+			emailVerificationRequired: form.get('emailVerificationRequired') === 'on'
 		},
 		errors
 	};

@@ -4,7 +4,8 @@ import { createSession } from '$lib/server/auth/sessions';
 import { ApiError, api, clientAddress, readJson } from '$lib/server/http';
 import { rateLimit } from '$lib/server/rate-limit';
 import { ensureProjectAccess } from '$lib/server/services/members';
-import { getUserByEmail, toViewerDto } from '$lib/server/services/users';
+import { getUserByEmail } from '$lib/server/services/users';
+import { widgetViewer } from '$lib/server/widget-viewer';
 import { requireTurnstile } from '$lib/server/turnstile';
 import { widgetLoginSchema } from '$lib/server/validation';
 import type { WidgetAuthResultDto } from '$lib/shared/types';
@@ -28,6 +29,9 @@ export const POST = api(async (event) => {
 	const user = await getUserByEmail(input.email);
 	const valid = user ? await verifyPassword(input.password, user.passwordHash) : false;
 	if (!user || !valid) throw new ApiError(400, 'Incorrect email or password', 'invalid_credentials');
+	if (!user.emailVerifiedAt) {
+		throw new ApiError(403, 'Confirm your email address first. Check your inbox for the link we sent.', 'email_unverified');
+	}
 	if (!(await ensureProjectAccess(user, project))) {
 		throw new ApiError(403, 'Your account does not have access to this project', 'project_access_denied');
 	}
@@ -40,7 +44,7 @@ export const POST = api(async (event) => {
 		userAgent: event.request.headers.get('user-agent'),
 		ipAddress: clientAddress(event)
 	});
-	return json({ token, viewer: toViewerDto(user) } satisfies WidgetAuthResultDto, {
+	return json({ token, viewer: await widgetViewer(user, project.id) } satisfies WidgetAuthResultDto, {
 		status: 201,
 		headers: { 'Cache-Control': 'no-store' }
 	});

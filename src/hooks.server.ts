@@ -9,6 +9,9 @@ import { getRequestOrigin, isOriginAllowed } from '$lib/server/origins';
 import { ensureProjectAccess } from '$lib/server/services/members';
 import { getProjectByClientKey } from '$lib/server/services/projects';
 import { deleteExpiredAuthRequests } from '$lib/server/services/auth-requests';
+import { deleteExpiredVerifications } from '$lib/server/services/email-verification';
+import { cleanupNotifications, startNotificationScheduler } from '$lib/server/services/notifications';
+import { checkEmailTransport } from '$lib/server/email/mailer';
 import { errorResponse } from '$lib/server/http';
 import { applyCors, corsHeaders, WIDGET_API_PREFIX } from '$lib/server/widget-cors';
 
@@ -19,10 +22,26 @@ export const init: ServerInit = async () => {
 	}
 	await ensureBootstrapAdmin();
 
+	if (config.emailEnabled) {
+		// Do not block startup on the SMTP handshake; a failure is only logged and sends are retried.
+		void checkEmailTransport().then((result) => {
+			if (result.ok) {
+				console.log(
+					`[notette] Email enabled via ${config.smtpHost}:${config.smtpPort}; notification digests go out ${config.emailBatchSeconds}s after the first update`
+				);
+			} else {
+				console.warn(`[notette] Email is configured but the SMTP connection check failed: ${result.error}`);
+			}
+		});
+		startNotificationScheduler();
+	}
+
 	const maintenance = async () => {
 		try {
 			await deleteExpiredSessions();
 			await deleteExpiredAuthRequests();
+			await deleteExpiredVerifications();
+			await cleanupNotifications();
 		} catch (err) {
 			console.warn('[notette] Maintenance task failed', err);
 		}

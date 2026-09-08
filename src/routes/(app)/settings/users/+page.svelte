@@ -39,7 +39,10 @@
 					{#each data.users as user (user.id)}
 						<tr>
 							<td>{user.name}{#if user.isSelf}<span class="faint"> (you)</span>{/if}</td>
-							<td class="muted">{user.email}</td>
+							<td class="muted">
+								{user.email}
+								{#if !user.verified}<span class="badge neutral" title="Has not confirmed their email address yet and cannot sign in">unverified</span>{/if}
+							</td>
 							<td>
 								{#if data.canManage && !user.isSelf}
 									<form method="POST" action="?/setRole" class="row" use:enhance>
@@ -57,6 +60,12 @@
 							<td class="small muted">{timeAgo(user.createdAt)}</td>
 							{#if data.canManage}
 								<td>
+									{#if !user.verified}
+										<form method="POST" action="?/verify" use:enhance style="display: inline">
+											<input type="hidden" name="userId" value={user.id} />
+											<button class="btn btn-sm btn-ghost" type="submit" title="Activate the account without the confirmation email">Mark verified</button>
+										</form>
+									{/if}
 									{#if !user.isSelf}
 										<form method="POST" action="?/delete" use:enhance onsubmit={(e) => { if (!confirm(`Delete ${user.email}?`)) e.preventDefault(); }}>
 											<input type="hidden" name="userId" value={user.id} />

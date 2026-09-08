@@ -15,6 +15,13 @@
       "when": 1788818804706,
       "tag": "0001_members_signups",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788826318462,
+      "tag": "0002_email_notifications",
+      "breakpoints": true
     }
   ]
 }

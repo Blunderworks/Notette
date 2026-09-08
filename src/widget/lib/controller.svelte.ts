@@ -3,6 +3,8 @@ import type {
 	FeedbackDetailDto,
 	FeedbackStatus,
 	FeedbackSummaryDto,
+	MentionCandidateDto,
+	MentionRef,
 	WidgetAuthResultDto,
 	WidgetConfigDto,
 	WidgetLoginPayload,
@@ -25,10 +27,11 @@ export interface ComposerTarget {
 }
 
 /**
- * `form` shows the inline sign-in/sign-up dialog; the remaining non-idle
- * states belong to the dashboard-approval (popup + polling) flow.
+ * `form` shows the inline sign-in/sign-up dialog, `verify` the "check your
+ * inbox" notice after a sign-up that needs email confirmation; the remaining
+ * non-idle states belong to the dashboard-approval (popup + polling) flow.
  */
-export type AuthStatus = 'idle' | 'form' | 'waiting' | 'blocked' | 'denied' | 'expired' | 'error';
+export type AuthStatus = 'idle' | 'form' | 'verify' | 'waiting' | 'blocked' | 'denied' | 'expired' | 'error';
 export type AuthMode = 'login' | 'signup';
 
 export interface Toast {
@@ -94,6 +97,13 @@ export class WidgetController {
 		pageLoading: false,
 		currentPath: typeof location !== 'undefined' ? location.pathname : '/',
 		auth: { status: 'idle' as AuthStatus, mode: 'login' as AuthMode, url: '', message: '' },
+		/** Address a confirmation link was sent to (auth status `verify`). */
+		verifyEmail: '',
+		/** The server can send email: notification preferences and verification apply. */
+		emailEnabled: false,
+		/** People the signed-in viewer may @-mention; empty for anonymous reviewers. */
+		mentionCandidates: [] as MentionCandidateDto[],
+		accountMenuOpen: false,
 		/** Cloudflare Turnstile site key when the server has bot protection configured. */
 		turnstileSiteKey: null as string | null,
 		toast: null as Toast | null,
@@ -153,10 +163,12 @@ export class WidgetController {
 			this.ui.dashboardUrl = config.dashboardUrl;
 			this.ui.viewer = config.viewer;
 			this.ui.turnstileSiteKey = config.turnstileSiteKey;
+			this.ui.emailEnabled = config.emailEnabled;
 			if (this.token && !config.viewer) {
 				// Token expired or revoked.
 				this.setToken(null);
 			}
+			if (config.viewer) void this.loadMentionCandidates();
 		} catch (err) {
 			const message =
 				err instanceof NotetteApiError
@@ -263,6 +275,20 @@ export class WidgetController {
 		}
 	}
 
+	/** Loads who the viewer may @-mention; silently empty when signed out or on failure. */
+	async loadMentionCandidates(): Promise<void> {
+		if (!this.isSignedIn) {
+			this.ui.mentionCandidates = [];
+			return;
+		}
+		try {
+			const result = await this.api.getMentionCandidates();
+			if (!this.disposed && this.isSignedIn) this.ui.mentionCandidates = result.users;
+		} catch {
+			this.ui.mentionCandidates = [];
+		}
+	}
+
 	async refreshItem(id: string): Promise<void> {
 		try {
 			const detail = await this.api.getDetail(id);
@@ -307,6 +333,7 @@ export class WidgetController {
 
 	collapse(): void {
 		this.ui.expanded = false;
+		this.ui.accountMenuOpen = false;
 		this.ui.picking = false;
 		this.ui.panelOpen = false;
 		this.ui.composer = null;
@@ -361,6 +388,27 @@ export class WidgetController {
 		this.ui.panelOpen = false;
 	}
 
+	toggleAccountMenu(): void {
+		this.ui.accountMenuOpen = !this.ui.accountMenuOpen;
+	}
+
+	closeAccountMenu(): void {
+		this.ui.accountMenuOpen = false;
+	}
+
+	/** Per-project email notification preference of the signed-in viewer. */
+	async setEmailNotifications(enabled: boolean): Promise<void> {
+		if (!this.ui.viewer) return;
+		try {
+			const result = await this.api.setNotifications(enabled);
+			this.ui.viewer.emailNotifications = result.email;
+			this.toast(result.email ? 'Email notifications on' : 'Email notifications off', 'success');
+		} catch (err) {
+			this.handleAuthError(err);
+			this.toast(err instanceof NotetteApiError ? err.message : 'Could not save the setting', 'error');
+		}
+	}
+
 	beginCompose(element: Element | null, clientX: number, clientY: number): void {
 		const pageX = Math.round(clientX + window.scrollX);
 		const pageY = Math.round(clientY + window.scrollY);
@@ -409,6 +457,7 @@ export class WidgetController {
 		author: AuthorIdentity;
 		screenshot: boolean;
 		turnstileToken?: string | null;
+		mentions?: MentionRef[];
 	}): Promise<FeedbackDetailDto> {
 		const { target } = input;
 		const element = target.element;
@@ -422,6 +471,7 @@ export class WidgetController {
 						email: input.author.email.trim() || undefined
 					},
 			turnstileToken: this.isSignedIn ? undefined : (input.turnstileToken ?? undefined),
+			mentions: this.isSignedIn && input.mentions?.length ? input.mentions.map((m) => m.id) : undefined,
 			page: {
 				url: location.href,
 				title: document.title || undefined,
@@ -513,14 +563,21 @@ export class WidgetController {
 		this.ui.highlightId = null;
 	}
 
-	async reply(id: string, body: string, author: AuthorIdentity, turnstileToken?: string | null): Promise<void> {
+	async reply(
+		id: string,
+		body: string,
+		author: AuthorIdentity,
+		turnstileToken?: string | null,
+		mentions?: MentionRef[]
+	): Promise<void> {
 		let comment: Awaited<ReturnType<ApiClient['addComment']>>;
 		try {
 			comment = await this.api.addComment(
 				id,
 				body.trim(),
 				this.isSignedIn ? undefined : { name: author.name.trim() || undefined, email: author.email.trim() || undefined },
-				this.isSignedIn ? undefined : (turnstileToken ?? undefined)
+				this.isSignedIn ? undefined : (turnstileToken ?? undefined),
+				this.isSignedIn && mentions?.length ? mentions.map((m) => m.id) : undefined
 			);
 		} catch (err) {
 			this.handleAuthError(err);
@@ -668,7 +725,23 @@ export class WidgetController {
 
 	async signUp(input: WidgetSignupPayload): Promise<void> {
 		const result = await this.api.signup(input);
+		if ('verificationRequired' in result) {
+			// The account exists but cannot sign in until the emailed link is opened.
+			this.ui.verifyEmail = result.email;
+			this.ui.auth = { status: 'verify', mode: 'login', url: '', message: '' };
+			return;
+		}
 		await this.applySignedIn(result, `Welcome, ${result.viewer.name}`);
+	}
+
+	/** Requests a new confirmation link for an unverified account. */
+	async resendVerification(email: string): Promise<void> {
+		try {
+			await this.api.resendVerification(email);
+			this.toast(`Confirmation email sent to ${email}`, 'success');
+		} catch (err) {
+			this.toast(err instanceof NotetteApiError ? err.message : 'Could not send the email', 'error');
+		}
 	}
 
 	private async applySignedIn(result: WidgetAuthResultDto, message: string): Promise<void> {
@@ -678,6 +751,7 @@ export class WidgetController {
 		this.toast(message, 'success');
 		this.ui.expanded = true;
 		await this.loadPageItems();
+		void this.loadMentionCandidates();
 		this.applyPendingFocus();
 	}
 
@@ -690,6 +764,8 @@ export class WidgetController {
 		if (err.status !== 401) return;
 		if (this.token) this.setToken(null);
 		this.ui.viewer = null;
+		this.ui.mentionCandidates = [];
+		this.ui.accountMenuOpen = false;
 		if (this.requiresSignIn) this.openSignIn();
 	}
 
@@ -771,6 +847,8 @@ export class WidgetController {
 		}
 		this.setToken(null);
 		this.ui.viewer = null;
+		this.ui.mentionCandidates = [];
+		this.ui.accountMenuOpen = false;
 		this.ui.panelOpen = false;
 		this.closeThread();
 		this.toast('Signed out', 'info');

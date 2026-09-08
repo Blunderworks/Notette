@@ -16,7 +16,8 @@
 					reviewerRepliesEnabled: project.reviewerRepliesEnabled,
 					screenshotsEnabled: project.screenshotsEnabled,
 					anonymousFeedbackAllowed: project.anonymousFeedbackAllowed,
-					openSignups: project.openSignups
+					openSignups: project.openSignups,
+					emailVerificationRequired: project.emailVerificationRequired
 				}
 	);
 	const memberValues = $derived(
@@ -153,6 +154,22 @@
 					</span>
 				</span>
 			</label>
+			<label class="checkbox">
+				<input type="checkbox" name="emailVerificationRequired" checked={values.emailVerificationRequired} disabled={!data.emailConfigured} />
+				<span>
+					<strong>Require email verification for signups</strong>
+					<span class="help" style="display: block">
+						{#if data.emailConfigured}
+							Accounts created from the widget must confirm their email address through a link before they can sign in.
+						{:else}
+							Needs outgoing email: set <code class="inline">SMTP_HOST</code> and <code class="inline">EMAIL_FROM</code> on the server to enable this.
+						{/if}
+					</span>
+				</span>
+			</label>
+			{#if !data.emailConfigured && values.emailVerificationRequired}
+				<input type="hidden" name="emailVerificationRequired" value="on" />
+			{/if}
 		</div>
 		<div class="card-footer form-actions">
 			<button class="btn btn-primary" type="submit">Save settings</button>
@@ -229,6 +246,39 @@
 			</form>
 		</div>
 	</div>
+
+	<form method="POST" action="?/notifications" class="card" use:enhance>
+		<div class="card-header">
+			<h2>Your notifications</h2>
+		</div>
+		<div class="card-body stack">
+			{#if form?.action === 'notifications' && form.success}
+				<div class="form-success">Notification settings saved.</div>
+			{/if}
+			{#if data.emailConfigured}
+				<label class="checkbox">
+					<input type="checkbox" name="emailNotifications" checked={data.emailNotifications} />
+					<span>
+						<strong>Email me about activity in this project</strong>
+						<span class="help" style="display: block">
+							New feedback, replies in threads you take part in and @-mentions, grouped into one email about a minute
+							after the first update. This setting is personal to your account.
+						</span>
+					</span>
+				</label>
+			{:else}
+				<p class="muted small">
+					Email notifications are unavailable because outgoing email is not configured on this server. Set
+					<code class="inline">SMTP_HOST</code> and <code class="inline">EMAIL_FROM</code> to enable them.
+				</p>
+			{/if}
+		</div>
+		{#if data.emailConfigured}
+			<div class="card-footer form-actions">
+				<button class="btn btn-primary" type="submit">Save</button>
+			</div>
+		{/if}
+	</form>
 
 	<div class="card danger">
 		<div class="card-header">

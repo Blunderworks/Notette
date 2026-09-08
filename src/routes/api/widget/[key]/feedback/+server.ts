@@ -8,6 +8,8 @@ import { randomToken, sha256 } from '$lib/server/ids';
 import { isOriginAllowed, normalizeOrigin } from '$lib/server/origins';
 import { rateLimit } from '$lib/server/rate-limit';
 import { createFeedback, getFeedbackThread, listFeedback, toDetailDto, toSummaryDto } from '$lib/server/services/feedback';
+import { resolveMentions } from '$lib/server/services/mentions';
+import { queueFeedbackNotifications } from '$lib/server/services/notifications';
 import { requireTurnstile } from '$lib/server/turnstile';
 import { feedbackCreateSchema } from '$lib/server/validation';
 import { requireWidgetViewer } from '$lib/server/widget-access';
@@ -72,9 +74,12 @@ export const POST = api(async (event) => {
 		throw new ApiError(400, 'Page URL does not belong to an allowed origin', 'bad_page_url');
 	}
 
+	// Mentions are only honoured for signed-in authors and only for people they may mention.
+	const mentions = await resolveMentions(user, project.id, input.mentions);
 	const created = await createFeedback(project, input, {
 		user,
-		userAgent: event.request.headers.get('user-agent')
+		userAgent: event.request.headers.get('user-agent'),
+		mentions
 	});
 
 	let uploadToken: string | null = null;
@@ -88,6 +93,7 @@ export const POST = api(async (event) => {
 
 	const thread = await getFeedbackThread(created.id);
 	if (!thread) throw new ApiError(500, 'Feedback vanished after creation', 'internal_error');
+	await queueFeedbackNotifications(thread.item, user);
 	return json(
 		{ item: toDetailDto(thread, baseUrl(event)), uploadToken },
 		{ status: 201, headers: { 'Cache-Control': 'no-store' } }

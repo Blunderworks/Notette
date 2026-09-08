@@ -18,6 +18,7 @@ export interface ProjectInput {
 	screenshotsEnabled: boolean;
 	anonymousFeedbackAllowed: boolean;
 	openSignups: boolean;
+	emailVerificationRequired: boolean;
 }
 
 const openCount = sql<number>`(select count(*)::int from ${feedback} f where f.project_id = ${projects.id} and f.status = 'open')`;

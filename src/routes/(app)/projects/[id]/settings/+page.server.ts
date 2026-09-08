@@ -1,19 +1,28 @@
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
+import { config } from '$lib/server/env';
 import { ApiError } from '$lib/server/http';
 import { isUuid } from '$lib/server/ids';
 import { parseProjectForm } from '$lib/server/project-form';
 import { addProjectMember, listProjectMembers, removeProjectMember } from '$lib/server/services/members';
+import { isEmailNotificationsEnabled, setEmailNotifications } from '$lib/server/services/notifications';
 import { deleteProject, getProject, regenerateClientKey, updateProject } from '$lib/server/services/projects';
 import { createUser, getUserById, listUsers } from '$lib/server/services/users';
 import { emailSchema, passwordSchema } from '$lib/server/validation';
 import { isAdminRole } from '$lib/shared/roles';
 
-export const load: PageServerLoad = async ({ url, params }) => {
-	const [members, allUsers] = await Promise.all([listProjectMembers(params.id), listUsers()]);
+export const load: PageServerLoad = async ({ url, params, locals }) => {
+	const [members, allUsers, emailNotifications] = await Promise.all([
+		listProjectMembers(params.id),
+		listUsers(),
+		config.emailEnabled ? isEmailNotificationsEnabled(locals.user!.id, params.id) : Promise.resolve(true)
+	]);
 	const memberIds = new Set(members.map((m) => m.userId));
 	return {
 		created: url.searchParams.get('created') === '1',
+		emailConfigured: config.emailEnabled,
+		/** The signed-in admin's own preference for this project. */
+		emailNotifications,
 		members: members.map((m) => ({
 			userId: m.userId,
 			name: m.name,
@@ -95,6 +104,11 @@ export const actions: Actions = {
 		}
 		await addProjectMember(params.id, userId, locals.user!.id);
 		return { action: 'createMember', success: true };
+	},
+	notifications: async ({ request, params, locals }) => {
+		const form = await request.formData();
+		await setEmailNotifications(locals.user!.id, params.id, form.get('emailNotifications') === 'on');
+		return { action: 'notifications', success: true };
 	},
 	removeMember: async ({ request, params }) => {
 		const form = await request.formData();

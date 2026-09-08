@@ -6,6 +6,9 @@
 	import type { WidgetController } from '../lib/controller.svelte';
 	import { pinPosition } from '../lib/dom';
 	import { placeNear } from '../lib/position';
+	import MentionText from '$lib/components/MentionText.svelte';
+	import MentionTextarea from '$lib/components/MentionTextarea.svelte';
+	import type { MentionRef } from '$lib/shared/types';
 	import Icon from './Icon.svelte';
 	import Turnstile from './Turnstile.svelte';
 
@@ -16,6 +19,7 @@
 	let height = $state(0);
 	let tick = $state(0);
 	let replyBody = $state('');
+	let replyMentions = $state<MentionRef[]>([]);
 	const author = c.getAuthor();
 	let name = $state(author.name);
 	let email = $state(author.email);
@@ -87,8 +91,9 @@
 		busy = true;
 		error = null;
 		try {
-			await c.reply(item.id, replyBody, { name, email }, turnstileToken);
+			await c.reply(item.id, replyBody, { name, email }, turnstileToken, replyMentions);
 			replyBody = '';
+			replyMentions = [];
 		} catch (err) {
 			error = err instanceof NotetteApiError ? err.message : 'Could not post reply.';
 		} finally {
@@ -208,7 +213,7 @@
 					{#if item.isAdmin}<span class="nt-badge nt-badge-admin">admin</span>{:else if item.isMember}<span class="nt-badge nt-badge-member">member</span>{/if}
 					<span class="nt-faint" title={item.createdAt}>{timeAgo(item.createdAt)}</span>
 				</div>
-				<div class="body">{item.body}</div>
+				<div class="body"><MentionText text={item.body} mentions={item.mentions} /></div>
 				{#if item.elementTag}
 					<div class="element nt-mono" title={item.elementSelector ?? ''}>
 						&lt;{item.elementTag}&gt;{item.elementText ? ` "${item.elementText.slice(0, 60)}${item.elementText.length > 60 ? '…' : ''}"` : ''}
@@ -228,7 +233,7 @@
 						{#if comment.isAdmin}<span class="nt-badge nt-badge-admin">admin</span>{:else if comment.isMember}<span class="nt-badge nt-badge-member">member</span>{/if}
 						<span class="nt-faint" title={comment.createdAt}>{timeAgo(comment.createdAt)}</span>
 					</div>
-					<div class="body">{comment.body}</div>
+					<div class="body"><MentionText text={comment.body} mentions={comment.mentions} /></div>
 				</div>
 			{/each}
 		</div>
@@ -237,15 +242,18 @@
 
 		{#if c.canReply}
 			<form class="reply" onsubmit={sendReply}>
-				<textarea
-					class="nt-textarea"
+				<MentionTextarea
 					bind:value={replyBody}
+					bind:mentions={replyMentions}
+					candidates={ui.mentionCandidates}
+					class="nt-textarea"
+					placement="up"
 					onkeydown={onKeydown}
-					placeholder="Reply…"
-					rows="2"
-					maxlength="5000"
+					placeholder={ui.mentionCandidates.length ? 'Reply… type @ to mention someone' : 'Reply…'}
+					rows={2}
+					maxlength={5000}
 					disabled={busy}
-				></textarea>
+				/>
 				{#if !ui.viewer && !c.config.user?.name}
 					<div class="identity">
 						<input class="nt-input" bind:value={name} placeholder="Your name (optional)" maxlength="120" disabled={busy} />

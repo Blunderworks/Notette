@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 
-	let { form } = $props();
+	let { data, form } = $props();
 	const values = $derived(
 		form?.values ?? {
 			name: '',
@@ -10,7 +10,8 @@
 			reviewerRepliesEnabled: true,
 			screenshotsEnabled: true,
 			anonymousFeedbackAllowed: true,
-			openSignups: false
+			openSignups: false,
+			emailVerificationRequired: false
 		}
 	);
 </script>
@@ -84,6 +85,22 @@
 					</span>
 				</span>
 			</label>
+			<label class="checkbox">
+				<input type="checkbox" name="emailVerificationRequired" checked={values.emailVerificationRequired} disabled={!data.emailConfigured} />
+				<span>
+					<strong>Require email verification for signups</strong>
+					<span class="help" style="display: block">
+						{#if data.emailConfigured}
+							Accounts created from the widget must confirm their email address before they can sign in.
+						{:else}
+							Needs outgoing email (<code class="inline">SMTP_HOST</code> and <code class="inline">EMAIL_FROM</code>) on the server.
+						{/if}
+					</span>
+				</span>
+			</label>
+			{#if !data.emailConfigured && values.emailVerificationRequired}
+				<input type="hidden" name="emailVerificationRequired" value="on" />
+			{/if}
 		</div>
 		<div class="card-footer form-actions">
 			<button class="btn btn-primary" type="submit">Create project</button>
