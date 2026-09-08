@@ -181,6 +181,12 @@ button {
 	font-size: 14px;
 	font-weight: 800;
 }
+/* The logo image already carries the accent background and rounded corners. */
+img.brand-mark {
+	display: block;
+	background: none;
+	object-fit: contain;
+}
 
 .nav-section {
 	margin-top: 14px;

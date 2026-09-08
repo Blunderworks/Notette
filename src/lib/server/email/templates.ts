@@ -5,6 +5,7 @@
  */
 
 import { segmentMentions } from '$lib/shared/mentions';
+import { LOGO_CID } from './logo';
 
 export interface RenderedEmail {
 	subject: string;
@@ -92,7 +93,7 @@ ${preheader}
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;">
 <tr><td style="padding:0 4px 14px;">
 <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
-<td style="width:26px;height:26px;border-radius:7px;background:${palette.accent};color:#ffffff;font-weight:700;font-size:14px;text-align:center;vertical-align:middle;line-height:26px;">N</td>
+<td style="width:26px;line-height:0;vertical-align:middle;"><img src="cid:${LOGO_CID}" width="26" height="26" alt="" style="display:block;width:26px;height:26px;border:0;border-radius:7px;"></td>
 <td style="padding-left:9px;font-weight:600;font-size:15px;">Notette</td>
 ${eyebrow ? `<td style="padding-left:8px;">${eyebrow}</td>` : ''}
 </tr></table>

@@ -1,11 +1,29 @@
 import nodemailer, { type Transporter } from 'nodemailer';
 import { config } from '$lib/server/env';
+import { LOGO_CID, LOGO_FILENAME, logoPngBuffer } from './logo';
 
 export interface OutgoingEmail {
 	to: string;
 	subject: string;
 	html: string;
 	text: string;
+}
+
+/**
+ * Every layout in `templates.ts` shows the Notette mark via `cid:` , so each
+ * message carries the PNG as an inline attachment. Referencing it this way
+ * keeps the logo visible in clients that block remote images and on instances
+ * with no public URL configured.
+ */
+function messageFor(mail: OutgoingEmail) {
+	return {
+		from: config.emailFrom!,
+		to: mail.to,
+		subject: mail.subject,
+		text: mail.text,
+		html: mail.html,
+		attachments: [{ filename: LOGO_FILENAME, content: logoPngBuffer(), contentType: 'image/png', cid: LOGO_CID }]
+	};
 }
 
 let transporter: Transporter | null = null;
@@ -40,13 +58,7 @@ function getTransporter(): Transporter {
  */
 export async function sendEmail(mail: OutgoingEmail): Promise<void> {
 	if (!config.emailEnabled) throw new Error('Email is not configured (set SMTP_HOST and EMAIL_FROM)');
-	await getTransporter().sendMail({
-		from: config.emailFrom!,
-		to: mail.to,
-		subject: mail.subject,
-		text: mail.text,
-		html: mail.html
-	});
+	await getTransporter().sendMail(messageFor(mail));
 }
 
 /** Connects to the SMTP server once so misconfiguration shows up in the startup log. */
@@ -93,13 +105,7 @@ export function formatEmailError(err: unknown): string {
 export async function sendTestEmail(mail: OutgoingEmail): Promise<TestEmailResult> {
 	if (!config.emailEnabled) return { ok: false, error: 'Email is not configured (set SMTP_HOST and EMAIL_FROM)' };
 	try {
-		const info = await getTransporter().sendMail({
-			from: config.emailFrom!,
-			to: mail.to,
-			subject: mail.subject,
-			text: mail.text,
-			html: mail.html
-		});
+		const info = await getTransporter().sendMail(messageFor(mail));
 		if (info.rejected?.length) {
 			return { ok: false, error: `The server rejected the recipient ${info.rejected.join(', ')}: ${info.response}` };
 		}

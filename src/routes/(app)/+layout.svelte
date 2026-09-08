@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { base } from '$app/paths';
 	import { page } from '$app/state';
 
 	let { data, children } = $props();
@@ -20,7 +21,7 @@
 	{/if}
 	<aside class="sidebar" class:open={menuOpen}>
 		<a class="brand" href="/">
-			<span class="brand-mark">N</span>
+			<img class="brand-mark" src="{base}/favicon.svg" alt="" width="28" height="28" />
 			Notette
 		</a>
 		<a class="nav-link" class:active={isActive('/', true)} href="/">Overview</a>
@@ -54,7 +55,7 @@
 	<div>
 		<div class="topbar">
 			<a class="brand" href="/" style="padding: 0">
-				<span class="brand-mark">N</span>
+				<img class="brand-mark" src="{base}/favicon.svg" alt="" width="28" height="28" />
 				Notette
 			</a>
 			<button class="btn btn-sm" type="button" onclick={() => (menuOpen = !menuOpen)} aria-expanded={menuOpen}>
