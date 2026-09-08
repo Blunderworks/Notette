@@ -24,7 +24,7 @@ RUN pnpm install --frozen-lockfile --prod --ignore-scripts
 
 # ---- runtime ----------------------------------------------------------------
 FROM base AS runtime
-RUN apk add --no-cache tini
+RUN apk add --no-cache tini su-exec
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/build ./build
 COPY --from=build /app/drizzle ./drizzle
@@ -35,7 +35,6 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
 	&& mkdir -p /data/uploads \
 	&& chown -R node:node /data /app
 
-USER node
 ENV PORT=3000 \
 	HOST=0.0.0.0 \
 	BODY_SIZE_LIMIT=12M \

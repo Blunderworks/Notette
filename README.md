@@ -80,6 +80,8 @@ Two Docker volumes hold all state:
 - `notette-db` — PostgreSQL data (projects, users, feedback, comments, sessions)
 - `notette-uploads` — screenshots (`/data/uploads` inside the app container)
 
+The app process runs as the unprivileged `node` user. On start the container fixes ownership of the uploads directory, so a root-owned bind mount (e.g. `./data/uploads:/data/uploads`) works without a manual `chown`.
+
 Back up both:
 
 ```bash
