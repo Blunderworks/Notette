@@ -176,7 +176,17 @@ Two separate pushes are involved:
 - Pushing **`main`** runs the `CI` workflow (check, test, build). It does not publish anything.
 - Pushing a **`vX.Y.Z` tag** runs the `Release` workflow, which type-checks, tests, builds, and publishes `ghcr.io/blunderworks/notette` with `X.Y.Z`, `X.Y`, `X` and `latest` tags for `linux/amd64` and `linux/arm64`. The image is built from the commit the tag points at, whether or not that commit is on `origin/main`.
 
-Do this every time you cut a release:
+The easiest way to cut a release is the release script, which runs every step below for you:
+
+```bash
+pnpm release:patch   # 0.1.5 -> 0.1.6
+pnpm release:minor   # 0.1.5 -> 0.2.0
+pnpm release:major   # 0.1.5 -> 1.0.0
+```
+
+It refuses to run unless the working tree is clean and you are on `main`, then runs `check`/`test`/`build`, bumps `package.json`, commits `Bump to X.Y.Z`, pushes `main`, creates the annotated tag `vX.Y.Z` and pushes it. It also stops if that tag already exists locally or on `origin`.
+
+The manual equivalent, if you need to do it by hand:
 
 ```bash
 # 1. Make sure everything is committed and verified locally
