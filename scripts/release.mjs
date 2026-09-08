@@ -19,13 +19,16 @@ if (!['patch', 'minor', 'major'].includes(level)) {
 }
 
 function run(cmd, args, { capture = false } = {}) {
-	const shown = [cmd, ...args].join(' ');
+	const shown = [cmd, ...args].map((a) => (/\s/.test(a) ? JSON.stringify(a) : a)).join(' ');
 	if (!capture) console.log(`\n> ${shown}`);
 	try {
 		return execFileSync(cmd, args, {
 			stdio: capture ? ['ignore', 'pipe', 'inherit'] : 'inherit',
 			encoding: 'utf8',
-			shell: process.platform === 'win32'
+			// On Windows `pnpm` is a .cmd shim that only runs through a shell. Git is a real
+			// executable, so it runs directly and its arguments (e.g. the commit message) reach
+			// it verbatim instead of being re-split by cmd.exe.
+			shell: cmd === 'pnpm' && process.platform === 'win32'
 		});
 	} catch (error) {
 		console.error(`\nCommand failed: ${shown}`);
