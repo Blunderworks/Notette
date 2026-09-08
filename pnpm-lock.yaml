@@ -39,9 +39,9 @@ importers:
       drizzle-kit:
         specifier: ^0.31.10
         version: 0.31.10
-      html2canvas:
-        specifier: ^1.4.1
-        version: 1.4.1
+      html2canvas-pro:
+        specifier: ^2.4.2
+        version: 2.4.2
       jsdom:
         specifier: ^26.1.0
         version: 26.1.0
@@ -1102,9 +1102,9 @@ packages:
     resolution: {integrity: sha512-Y22oTqIU4uuPgEemfz7NDJz6OeKf12Lsu+QC+s3BVpda64lTiMYCyGwg5ki4vFxkMwQdeZDl2adZoqUgdFuTgQ==}
     engines: {node: '>=18'}
 
-  html2canvas@1.4.1:
-    resolution: {integrity: sha512-fPU6BHNpsyIhr8yyMpTLLxAbkaK8ArIBcmZIRiBLiDhjeqvXolaEmDGmELFuX9I4xDcaKKcJl+TKZLqruBbmWA==}
-    engines: {node: '>=8.0.0'}
+  html2canvas-pro@2.4.2:
+    resolution: {integrity: sha512-W0QvhquArW7jnorC66FaCpP1LflcUJUdyLTUD8zAz0ka8kJv/PLW45W+lg5ZonBU1lOtKZU+FOntr+XTu1iPcA==}
+    engines: {node: '>=16.0.0'}
 
   http-proxy-agent@7.0.2:
     resolution: {integrity: sha512-T1gkAiYYDWYx3V5Bmyu7HcfcvL7mUrTWiM6yOfa3PIphViJ/gFPbvidQ+veqSOHci/PxBcDabeUNCzpOODJZig==}
@@ -2213,7 +2213,7 @@ snapshots:
     dependencies:
       whatwg-encoding: 3.1.1
 
-  html2canvas@1.4.1:
+  html2canvas-pro@2.4.2:
     dependencies:
       css-line-break: 2.1.0
       text-segmentation: 1.0.3

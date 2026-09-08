@@ -38,7 +38,7 @@
     "@types/node": "^22.15.0",
     "@types/nodemailer": "^8.0.1",
     "drizzle-kit": "^0.31.10",
-    "html2canvas": "^1.4.1",
+    "html2canvas-pro": "^2.4.2",
     "jsdom": "^26.1.0",
     "svelte": "^5.57.0",
     "svelte-check": "^4.7.6",
