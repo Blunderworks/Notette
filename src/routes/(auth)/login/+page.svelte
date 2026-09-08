@@ -7,6 +7,7 @@
 	let submitting = $state(false);
 	let turnstileToken = $state('');
 	let turnstileFailed = $state(false);
+	let turnstileError = $state<string | null>(null);
 	let turnstileContainer = $state<HTMLDivElement | null>(null);
 	let turnstileApi: TurnstileApi | null = null;
 	let turnstileId: string | null = null;
@@ -33,6 +34,7 @@
 					'timeout-callback': () => (turnstileToken = ''),
 					'error-callback': (code) => {
 						console.warn('[notette] Turnstile error', code ?? 'unknown');
+						turnstileError = code ?? null;
 						turnstileToken = '';
 						turnstileFailed = true;
 						return true;
@@ -117,7 +119,15 @@
 					<input type="hidden" name="cf-turnstile-response" value={turnstileToken} />
 					<div class="turnstile" bind:this={turnstileContainer}></div>
 					{#if turnstileFailed}
-						<div class="form-error">The verification challenge could not load. Reload the page and try again.</div>
+						<div class="form-error">
+							{#if turnstileError?.startsWith('1102')}
+								This hostname is not allowed for the Turnstile site key (error {turnstileError}). Add it under
+								Cloudflare → Turnstile → the widget's hostnames.
+							{:else}
+								The verification challenge could not load{#if turnstileError} (Turnstile error {turnstileError}){/if}.
+								Reload the page and try again.
+							{/if}
+						</div>
 					{/if}
 				{/if}
 				<button class="btn btn-primary btn-block" type="submit" disabled={!canSubmit}>

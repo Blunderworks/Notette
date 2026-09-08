@@ -15,6 +15,10 @@
 	let { siteKey, action, token = $bindable(null), failed = $bindable(false) }: Props = $props();
 
 	let container = $state<HTMLDivElement | null>(null);
+	/** Cloudflare error code from the last failure, e.g. 110200 (hostname not allowed for the site key). */
+	let errorCode = $state<string | null>(null);
+	/** Cloudflare reports a hostname missing from the site key's allow-list as 1102xx. */
+	const hostnameNotAllowed = $derived(!!errorCode && errorCode.startsWith('1102'));
 	let api: TurnstileApi | null = null;
 	let widgetId: string | null = null;
 
@@ -46,11 +50,13 @@
 					callback: (value) => {
 						token = value;
 						failed = false;
+						errorCode = null;
 					},
 					'expired-callback': () => (token = null),
 					'timeout-callback': () => (token = null),
 					'error-callback': (code) => {
 						console.warn('[notette] Turnstile error', code ?? 'unknown');
+						errorCode = code ?? null;
 						token = null;
 						failed = true;
 						return true;
@@ -77,7 +83,13 @@
 <div class="turnstile" bind:this={container}></div>
 {#if failed}
 	<div class="nt-error">
-		The verification challenge could not load. The site must allow <span class="nt-mono">challenges.cloudflare.com</span>.
+		{#if hostnameNotAllowed}
+			This site (<span class="nt-mono">{location.hostname}</span>) is not allowed for the Turnstile key. A Notette admin
+			must add it under Cloudflare → Turnstile → the widget's hostnames (error {errorCode}).
+		{:else}
+			The verification challenge could not load{#if errorCode} (Turnstile error {errorCode}){/if}. The site must allow
+			<span class="nt-mono">challenges.cloudflare.com</span>.
+		{/if}
 	</div>
 {/if}
 

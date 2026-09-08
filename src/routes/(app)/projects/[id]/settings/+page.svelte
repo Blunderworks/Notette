@@ -114,6 +114,10 @@
 				<span class="help">
 					One origin per line. Wildcards such as <code class="inline">https://*.vercel.app</code> or
 					<code class="inline">http://localhost:*</code> are supported. A lone <code class="inline">*</code> allows any origin.
+					{#if data.turnstileConfigured}
+						Bot protection is on: every hostname listed here must also be added to your Turnstile widget's hostnames in
+						the Cloudflare dashboard, or the challenge fails with error 110200.
+					{/if}
 				</span>
 			</div>
 			<label class="checkbox">

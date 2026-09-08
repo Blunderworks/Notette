@@ -21,6 +21,7 @@ export const load: PageServerLoad = async ({ url, params, locals }) => {
 	return {
 		created: url.searchParams.get('created') === '1',
 		emailConfigured: config.emailEnabled,
+		turnstileConfigured: config.turnstileEnabled,
 		/** The signed-in admin's own preference for this project. */
 		emailNotifications,
 		members: members.map((m) => ({
