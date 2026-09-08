@@ -49,7 +49,8 @@
 					},
 					'expired-callback': () => (token = null),
 					'timeout-callback': () => (token = null),
-					'error-callback': () => {
+					'error-callback': (code) => {
+						console.warn('[notette] Turnstile error', code ?? 'unknown');
 						token = null;
 						failed = true;
 						return true;

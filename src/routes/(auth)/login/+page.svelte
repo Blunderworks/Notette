@@ -31,7 +31,8 @@
 					callback: (token) => (turnstileToken = token),
 					'expired-callback': () => (turnstileToken = ''),
 					'timeout-callback': () => (turnstileToken = ''),
-					'error-callback': () => {
+					'error-callback': (code) => {
+						console.warn('[notette] Turnstile error', code ?? 'unknown');
 						turnstileToken = '';
 						turnstileFailed = true;
 						return true;
