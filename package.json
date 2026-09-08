@@ -1,6 +1,6 @@
 {
   "name": "notette",
-  "version": "0.1.3",
+  "version": "0.1.5",
   "private": true,
   "description": "Self-hosted, framework-agnostic preview feedback widget and dashboard.",
   "license": "MIT",
