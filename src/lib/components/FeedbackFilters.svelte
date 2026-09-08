@@ -24,12 +24,17 @@
 			{/each}
 		</select>
 	{/if}
-	<select class="select" name="status" aria-label="Status">
+	<select
+		class="select"
+		name="status"
+		aria-label="Status"
+		onchange={(e) => e.currentTarget.form?.requestSubmit()}
+	>
 		<option value="open" selected={status === 'open'}>Open</option>
 		<option value="resolved" selected={status === 'resolved'}>Resolved</option>
 		<option value="all" selected={status === 'all'}>All</option>
 	</select>
 	<input class="input search" type="search" name="q" placeholder="Search text, path, author or #number" value={q} />
-	<button class="btn" type="submit">Filter</button>
+	<button class="btn" type="submit">Search</button>
 	<span class="small faint">{total} {total === 1 ? 'item' : 'items'}</span>
 </form>
