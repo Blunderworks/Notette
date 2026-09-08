@@ -64,7 +64,7 @@ export const actions: Actions = {
 		const status = String(form.get('status') ?? '');
 		if (status !== 'open' && status !== 'resolved') return fail(400, { action: 'setStatus', error: 'Invalid status.' });
 		await setFeedbackStatus(thread.item.id, status, locals.user!);
-		return { action: 'setStatus', success: true };
+		redirect(303, `/projects/${params.id}`);
 	},
 	deleteComment: async ({ request, params }) => {
 		const thread = await loadThread(params.id, params.fid);

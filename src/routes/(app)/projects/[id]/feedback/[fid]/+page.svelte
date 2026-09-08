@@ -51,7 +51,7 @@
 					{item.status === 'open' ? 'Resolve' : 'Reopen'}
 				</button>
 			</form>
-			<form method="POST" action="?/delete" use:enhance onsubmit={(e) => { if (!confirm('Delete this feedback and its replies?')) e.preventDefault(); }}>
+			<form method="POST" action="?/delete" use:enhance={({ cancel }) => { if (!confirm('Delete this feedback and its replies?')) cancel(); }}>
 				<button class="btn btn-danger" type="submit">Delete</button>
 			</form>
 		</div>
@@ -78,7 +78,7 @@
 							<span class="author">{comment.authorName ?? 'Anonymous'}</span>
 							{#if comment.isAdmin}<span class="badge admin">admin</span>{:else if comment.isMember}<span class="badge member">member</span>{/if}
 							<span title={comment.createdAt}>{formatDateTime(comment.createdAt)}</span>
-							<form method="POST" action="?/deleteComment" style="margin-left: auto" use:enhance onsubmit={(e) => { if (!confirm('Delete this reply?')) e.preventDefault(); }}>
+							<form method="POST" action="?/deleteComment" style="margin-left: auto" use:enhance={({ cancel }) => { if (!confirm('Delete this reply?')) cancel(); }}>
 								<input type="hidden" name="commentId" value={comment.id} />
 								<button class="btn btn-ghost btn-sm" type="submit">Delete</button>
 							</form>

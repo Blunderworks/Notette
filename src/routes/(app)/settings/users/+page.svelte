@@ -67,7 +67,7 @@
 										</form>
 									{/if}
 									{#if !user.isSelf}
-										<form method="POST" action="?/delete" use:enhance onsubmit={(e) => { if (!confirm(`Delete ${user.email}?`)) e.preventDefault(); }}>
+										<form method="POST" action="?/delete" use:enhance={({ cancel }) => { if (!confirm(`Delete ${user.email}?`)) cancel(); }}>
 											<input type="hidden" name="userId" value={user.id} />
 											<button class="btn btn-sm btn-ghost" type="submit">Delete</button>
 										</form>
