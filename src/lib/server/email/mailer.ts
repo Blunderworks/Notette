@@ -56,6 +56,55 @@ export async function checkEmailTransport(): Promise<{ ok: boolean; error?: stri
 		await getTransporter().verify();
 		return { ok: true };
 	} catch (err) {
-		return { ok: false, error: err instanceof Error ? err.message : String(err) };
+		return { ok: false, error: formatEmailError(err) };
+	}
+}
+
+/** `host:port (mode)` for logs and the test email, e.g. `smtp.example.com:587 (STARTTLS)`. */
+export function describeEmailTransport(): string {
+	return `${config.smtpHost}:${config.smtpPort} (${config.smtpSecure ? 'TLS' : 'STARTTLS'}${config.smtpUser ? `, user ${config.smtpUser}` : ', no auth'})`;
+}
+
+export interface TestEmailResult {
+	ok: boolean;
+	/** Server reply to the final command when accepted, e.g. `250 2.0.0 OK`. */
+	response?: string;
+	/** Human readable failure: error code, SMTP command, server reply and message. */
+	error?: string;
+}
+
+/** Turns nodemailer/socket errors into one line with everything useful for diagnosing SMTP setups. */
+export function formatEmailError(err: unknown): string {
+	if (!(err instanceof Error)) return String(err);
+	const e = err as Error & { code?: string; command?: string; response?: string; responseCode?: number };
+	const parts: string[] = [];
+	if (e.code) parts.push(e.code);
+	if (e.command) parts.push(`during ${e.command}`);
+	if (e.response) parts.push(`server said: ${e.response.trim()}`);
+	else if (e.responseCode) parts.push(`server replied ${e.responseCode}`);
+	const prefix = parts.length ? `${parts.join(', ')} — ` : '';
+	return prefix + e.message;
+}
+
+/**
+ * Sends the test message from the account page. Never throws: the outcome is
+ * returned so the UI can show the server's reply or the failure verbatim.
+ */
+export async function sendTestEmail(mail: OutgoingEmail): Promise<TestEmailResult> {
+	if (!config.emailEnabled) return { ok: false, error: 'Email is not configured (set SMTP_HOST and EMAIL_FROM)' };
+	try {
+		const info = await getTransporter().sendMail({
+			from: config.emailFrom!,
+			to: mail.to,
+			subject: mail.subject,
+			text: mail.text,
+			html: mail.html
+		});
+		if (info.rejected?.length) {
+			return { ok: false, error: `The server rejected the recipient ${info.rejected.join(', ')}: ${info.response}` };
+		}
+		return { ok: true, response: info.response };
+	} catch (err) {
+		return { ok: false, error: formatEmailError(err) };
 	}
 }

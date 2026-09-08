@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildDigest, digestSubject, type DigestItem } from './digest';
-import { escapeHtml, renderBodyHtml, renderVerificationEmail } from './templates';
+import { escapeHtml, renderBodyHtml, renderTestEmail, renderVerificationEmail } from './templates';
 
 function item(overrides: Partial<DigestItem> = {}): DigestItem {
 	return {
@@ -131,5 +131,24 @@ describe('renderVerificationEmail', () => {
 		expect(renderVerificationEmail({ name: 'A', link: 'https://x/y', origin: null, expiresHours: 24 }).subject).toBe(
 			'Confirm your email for Notette'
 		);
+	});
+});
+
+describe('renderTestEmail', () => {
+	it('lists the transport details in both parts and escapes them', () => {
+		const email = renderTestEmail({
+			name: 'Ada <b>',
+			requestedBy: 'ada@example.com',
+			transport: 'smtp.example.com:587 (STARTTLS, user ada)',
+			from: 'Notette <no-reply@example.com>',
+			sentAt: new Date('2026-09-08T10:20:30.000Z')
+		});
+		expect(email.subject).toBe('Notette test email');
+		expect(email.html).toContain('Ada &lt;b&gt;');
+		expect(email.html).toContain('smtp.example.com:587 (STARTTLS, user ada)');
+		expect(email.html).toContain('Notette &lt;no-reply@example.com&gt;');
+		expect(email.html).toContain('2026-09-08 10:20:30 UTC');
+		expect(email.text).toContain('From: Notette <no-reply@example.com>');
+		expect(email.text).toContain('Requested by: ada@example.com');
 	});
 });

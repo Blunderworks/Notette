@@ -3,6 +3,7 @@
 	import { timeAgo } from '$lib/format';
 
 	let { data, form } = $props();
+	let sending = $state(false);
 </script>
 
 <svelte:head>
@@ -51,6 +52,43 @@
 		</div>
 		<div class="card-footer form-actions"><button class="btn btn-primary" type="submit">Change password</button></div>
 	</form>
+
+	{#if data.email}
+		<form method="POST" action="?/testEmail" class="card" use:enhance={() => { sending = true; return async ({ update }) => { sending = false; await update(); }; }}>
+			<div class="card-header"><h2>Email</h2></div>
+			<div class="card-body stack">
+				{#if data.email.enabled}
+					<p class="small muted" style="margin: 0">
+						Outgoing email goes through <span class="mono">{data.email.transport}</span> as <span class="mono">{data.email.from}</span>.
+						Send yourself a message to check that the SMTP settings work; the server's reply or the exact error is shown here.
+					</p>
+				{:else}
+					<div class="notice">
+						Email is not configured, so no notifications or confirmation links are sent. Set
+						{#each data.email.missing as name, i (name)}{i > 0 ? ' and ' : ''}<span class="mono">{name}</span>{/each}
+						(see the README) and restart Notette.
+					</div>
+				{/if}
+				{#if form?.action === 'testEmail' && form.error}
+					<div class="form-error">
+						<strong>Sending failed{#if form.to} to {form.to}{/if}{#if form.ms} after {form.ms} ms{/if}.</strong>
+						<pre class="mono small" style="margin: 8px 0 0; white-space: pre-wrap; word-break: break-word">{form.error}</pre>
+					</div>
+				{/if}
+				{#if form?.action === 'testEmail' && form.success}
+					<div class="form-success">
+						<strong>Accepted by the SMTP server</strong> in {form.ms} ms; check the inbox of {form.to} (and its spam folder).
+						{#if form.response}<div class="mono small" style="margin-top: 6px">{form.response}</div>{/if}
+					</div>
+				{/if}
+			</div>
+			<div class="card-footer form-actions">
+				<button class="btn btn-primary" type="submit" disabled={!data.email.enabled || sending}>
+					{sending ? 'Sending…' : `Send test email to ${data.user?.email}`}
+				</button>
+			</div>
+		</form>
+	{/if}
 
 	<div class="card">
 		<div class="card-header">

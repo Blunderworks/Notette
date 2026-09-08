@@ -149,3 +149,42 @@ export function renderVerificationEmail(input: VerificationEmailInput): Rendered
 	].join('\n');
 	return { subject, html, text };
 }
+
+export interface TestEmailInput {
+	name: string;
+	/** Who triggered the test, e.g. `admin@example.com`. */
+	requestedBy: string;
+	/** Human-readable transport summary, e.g. `smtp.example.com:587 (STARTTLS)`. */
+	transport: string;
+	from: string;
+	sentAt: Date;
+}
+
+/** Message sent by the *Send test email* button on the account page. */
+export function renderTestEmail(input: TestEmailInput): RenderedEmail {
+	const subject = 'Notette test email';
+	const when = input.sentAt.toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC');
+	const row = (label: string, value: string) =>
+		`<tr><td style="padding:4px 12px 4px 0;color:${palette.muted};white-space:nowrap;vertical-align:top;">${escapeHtml(label)}</td><td style="padding:4px 0;font-family:${MONO};font-size:12px;word-break:break-all;">${escapeHtml(value)}</td></tr>`;
+	const body = `
+<h1 style="margin:0 0 12px;font-size:20px;line-height:1.3;">Email is working</h1>
+<p style="margin:0 0 16px;color:${palette.muted};">Hi ${escapeHtml(input.name)}, this message was sent from the Notette dashboard to check the outgoing email configuration. If you can read it, notification digests and confirmation links will be delivered the same way.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="font-size:13px;">
+${row('Requested by', input.requestedBy)}
+${row('SMTP server', input.transport)}
+${row('From', input.from)}
+${row('Sent at', when)}
+</table>`;
+	const html = layout({ title: subject, preheader: 'Outgoing email from Notette is configured correctly.', body });
+	const text = [
+		`Hi ${input.name},`,
+		'',
+		'This message was sent from the Notette dashboard to check the outgoing email configuration. If you can read it, notification digests and confirmation links will be delivered the same way.',
+		'',
+		`Requested by: ${input.requestedBy}`,
+		`SMTP server: ${input.transport}`,
+		`From: ${input.from}`,
+		`Sent at: ${when}`
+	].join('\n');
+	return { subject, html, text };
+}
