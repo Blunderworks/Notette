@@ -171,7 +171,38 @@ Pins are re-anchored to the original element by CSS selector, falling back to XP
 
 ## Releasing
 
-Push a tag like `v1.2.3`. The `Release` workflow type-checks, tests, builds, and publishes `ghcr.io/blunderworks/notette` with `1.2.3`, `1.2`, `1` and `latest` tags for `linux/amd64` and `linux/arm64`.
+Two separate pushes are involved:
+
+- Pushing **`main`** runs the `CI` workflow (check, test, build). It does not publish anything.
+- Pushing a **`vX.Y.Z` tag** runs the `Release` workflow, which type-checks, tests, builds, and publishes `ghcr.io/blunderworks/notette` with `X.Y.Z`, `X.Y`, `X` and `latest` tags for `linux/amd64` and `linux/arm64`. The image is built from the commit the tag points at, whether or not that commit is on `origin/main`.
+
+Do this every time you cut a release:
+
+```bash
+# 1. Make sure everything is committed and verified locally
+git status                       # working tree must be clean
+pnpm run check && pnpm test && pnpm run build
+
+# 2. Bump the version in package.json to match the tag you are about to create
+pnpm version 0.1.4 --no-git-tag-version
+git add package.json
+git commit -m "Bump to 0.1.4"
+
+# 3. Push the branch first, then the tag
+git push origin main
+git tag v0.1.4
+git push origin v0.1.4
+
+# 4. Watch the Release workflow on GitHub (Actions tab) until it goes green
+```
+
+Notes:
+
+- `git push` on its own never pushes tags, and `git push origin v0.1.4` never pushes the branch. Pushing only the tag publishes an image from a commit that is not on `origin/main`; pushing only the branch publishes nothing. Always do both, branch first.
+- `git push --follow-tags` pushes `main` and any annotated tags on it in one command; it skips lightweight tags, so create the tag with `git tag -a v0.1.4 -m "v0.1.4"` if you want to rely on it.
+- To see what is unpushed: `git status` reports "Your branch is ahead of 'origin/main'", and `git ls-remote --tags origin` lists which tags GitHub already has.
+- A tag with a `-` in it (for example `v0.2.0-rc.1`) publishes the semver tags but not `latest`.
+- If a release run failed, fix `main`, then move the tag: `git tag -f v0.1.4 && git push --force origin v0.1.4`. Only do this for a tag that never produced a usable image.
 
 ## License
 
