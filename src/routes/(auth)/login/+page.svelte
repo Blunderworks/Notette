@@ -39,7 +39,10 @@
 					}
 				});
 			})
-			.catch(() => (turnstileFailed = true));
+			.catch((err) => {
+				console.warn('[notette] Turnstile script failed to load', err);
+				turnstileFailed = true;
+			});
 		return () => {
 			cancelled = true;
 			if (turnstileApi && turnstileId) {

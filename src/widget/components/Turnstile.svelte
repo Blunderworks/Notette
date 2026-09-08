@@ -57,7 +57,10 @@
 					}
 				});
 			})
-			.catch(() => (failed = true));
+			.catch((err) => {
+				console.warn('[notette] Turnstile script failed to load', err);
+				failed = true;
+			});
 		return () => {
 			cancelled = true;
 			if (api && widgetId) {
