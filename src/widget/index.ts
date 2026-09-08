@@ -8,6 +8,7 @@ import './widget.css';
 import App from './App.svelte';
 import { parseScriptConfig, resolveConfig, type NotetteInitOptions } from './lib/config';
 import { WidgetController } from './lib/controller.svelte';
+import { isolateHostEvents } from './lib/isolate';
 
 // Replaced at build time with the compiled component + base CSS (see vite.widget.config.ts).
 const WIDGET_CSS = '__NOTETTE_CSS__';
@@ -18,6 +19,7 @@ interface Instance {
 	controller: WidgetController;
 	app: ReturnType<typeof mount>;
 	host: HTMLElement;
+	unisolate: () => void;
 }
 
 let instance: Instance | null = null;
@@ -44,21 +46,25 @@ function init(options?: NotetteInitOptions): void {
 		const style = document.createElement('style');
 		style.textContent = WIDGET_CSS;
 		shadow.appendChild(style);
+		// Clicks, keys and focus changes inside the widget must not leak to the
+		// host page (they would close its modals, trigger shortcuts, etc.).
+		const unisolate = isolateHostEvents(host);
 		document.body.appendChild(host);
 
 		const controller = new WidgetController(config, host);
 		const app = mount(App, { target: shadow, context: new Map([['notette', controller]]) });
-		instance = { controller, app, host };
+		instance = { controller, app, host, unisolate };
 		void controller.start();
 	});
 }
 
 function destroy(): void {
 	if (!instance) return;
-	const { controller, app, host } = instance;
+	const { controller, app, host, unisolate } = instance;
 	instance = null;
 	controller.destroy();
 	void unmount(app);
+	unisolate();
 	host.remove();
 }
 

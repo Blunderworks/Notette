@@ -9,7 +9,9 @@
 	let menu = $state<HTMLElement | null>(null);
 	let busy = $state(false);
 
-	// Close on clicks elsewhere. The listener only observes; it never blocks the host page.
+	// Close on clicks elsewhere. The listener only observes; it never blocks the
+	// host page. Capture phase, because bubbling pointer events from inside the
+	// widget are stopped at the host element (see lib/isolate.ts).
 	$effect(() => {
 		const onPointerDown = (event: PointerEvent) => {
 			const path = event.composedPath();
@@ -18,8 +20,8 @@
 			if (path.some((node) => node instanceof HTMLElement && node.classList.contains('avatar'))) return;
 			c.closeAccountMenu();
 		};
-		window.addEventListener('pointerdown', onPointerDown, { passive: true });
-		return () => window.removeEventListener('pointerdown', onPointerDown);
+		window.addEventListener('pointerdown', onPointerDown, { capture: true, passive: true });
+		return () => window.removeEventListener('pointerdown', onPointerDown, { capture: true });
 	});
 
 	async function toggleEmail(event: Event) {

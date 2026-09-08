@@ -24,6 +24,12 @@
 		hover = { rect: el.getBoundingClientRect(), label: elementLabel(el) };
 	}
 
+	// Picking must not move focus onto the overlay (host pages with a focus
+	// trap or "focus outside" dismissal would react) or start a text selection.
+	function onPointerDown(event: PointerEvent) {
+		event.preventDefault();
+	}
+
 	function onClick(event: MouseEvent) {
 		event.preventDefault();
 		event.stopPropagation();
@@ -53,6 +59,7 @@
 	class="overlay"
 	type="button"
 	aria-label="Click an element on the page to leave feedback"
+	onpointerdown={onPointerDown}
 	onpointermove={onMove}
 	onpointerleave={() => (hover = null)}
 	onclick={onClick}
