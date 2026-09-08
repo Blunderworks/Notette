@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { base } from '$app/paths';
 	import { page } from '$app/state';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
 	let { data, children } = $props();
 	let menuOpen = $state(false);
@@ -67,3 +68,4 @@
 		</main>
 	</div>
 </div>
+<ConfirmDialog />

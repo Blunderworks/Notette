@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { confirmSubmit } from '$lib/confirm.svelte';
 	import { timeAgo } from '$lib/format';
 
 	let { data, form } = $props();
@@ -67,7 +68,7 @@
 										</form>
 									{/if}
 									{#if !user.isSelf}
-										<form method="POST" action="?/delete" use:enhance={({ cancel }) => { if (!confirm(`Delete ${user.email}?`)) cancel(); }}>
+										<form method="POST" action="?/delete" use:enhance={confirmSubmit({ title: `Delete ${user.email}?`, message: 'The account and its sessions are removed. Feedback and replies they wrote stay, shown as anonymous.', confirmLabel: 'Delete user' })}>
 											<input type="hidden" name="userId" value={user.id} />
 											<button class="btn btn-sm btn-ghost" type="submit">Delete</button>
 										</form>

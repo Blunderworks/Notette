@@ -3,7 +3,7 @@
 	import FeedbackList from '$lib/components/FeedbackList.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 
-	let { data } = $props();
+	let { data, form } = $props();
 </script>
 
 <svelte:head>
@@ -28,7 +28,14 @@
 				total={data.total}
 			/>
 		</div>
-		<FeedbackList items={data.items} showProject emptyTitle="No matching feedback" emptyText="Try a different filter or search term." />
+		{#if form?.action === 'bulk' && form.error}
+			<div class="form-error" style="margin: 12px 18px 0">{form.error}</div>
+		{:else if form?.action === 'bulk' && form.success}
+			<div class="form-success" style="margin: 12px 18px 0">
+				{form.count} {form.count === 1 ? 'item' : 'items'} {form.op === 'delete' ? 'deleted' : form.op === 'resolve' ? 'resolved' : 'reopened'}.
+			</div>
+		{/if}
+		<FeedbackList items={data.items} showProject selectable emptyTitle="No matching feedback" emptyText="Try a different filter or search term." />
 		<Pagination total={data.total} pageSize={data.pageSize} current={data.page} />
 	</div>
 </div>

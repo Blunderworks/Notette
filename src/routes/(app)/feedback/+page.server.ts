@@ -1,4 +1,5 @@
-import type { PageServerLoad } from './$types';
+import type { Actions, PageServerLoad } from './$types';
+import { bulkFeedbackAction } from '$lib/server/feedback-bulk';
 import { isUuid } from '$lib/server/ids';
 import { listFeedback, toSummaryDto } from '$lib/server/services/feedback';
 import { listProjects } from '$lib/server/services/projects';
@@ -32,4 +33,8 @@ export const load: PageServerLoad = async ({ url }) => {
 		page: currentPage,
 		pageSize: PAGE_SIZE
 	};
+};
+
+export const actions: Actions = {
+	bulk: (event) => bulkFeedbackAction(event)
 };

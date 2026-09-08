@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, or, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, ilike, inArray, or, sql, type SQL } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import {
 	comments,
@@ -227,6 +227,40 @@ export async function deleteFeedback(id: string): Promise<boolean> {
 	await deleteFilesForFeedback(id);
 	const deleted = await db.delete(feedback).where(eq(feedback.id, id)).returning({ id: feedback.id });
 	return deleted.length > 0;
+}
+
+/** Sets the status of several items at once (optionally restricted to one project); returns the number updated. */
+export async function setFeedbackStatusMany(
+	ids: string[],
+	status: FeedbackStatus,
+	user: User,
+	projectId?: string
+): Promise<number> {
+	if (ids.length === 0) return 0;
+	const where = projectId ? and(inArray(feedback.id, ids), eq(feedback.projectId, projectId)) : inArray(feedback.id, ids);
+	const rows = await db
+		.update(feedback)
+		.set({
+			status,
+			resolvedAt: status === 'resolved' ? new Date() : null,
+			resolvedById: status === 'resolved' ? user.id : null,
+			updatedAt: new Date()
+		})
+		.where(where)
+		.returning({ id: feedback.id });
+	return rows.length;
+}
+
+/** Deletes several items (and their screenshots), optionally restricted to one project; returns the number deleted. */
+export async function deleteFeedbackMany(ids: string[], projectId?: string): Promise<number> {
+	if (ids.length === 0) return 0;
+	const where = projectId ? and(inArray(feedback.id, ids), eq(feedback.projectId, projectId)) : inArray(feedback.id, ids);
+	const targets = await db.select({ id: feedback.id }).from(feedback).where(where);
+	let count = 0;
+	for (const { id } of targets) {
+		if (await deleteFeedback(id)) count += 1;
+	}
+	return count;
 }
 
 export function toSummaryDto(row: FeedbackRow): FeedbackSummaryDto {

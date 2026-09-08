@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { confirmSubmit } from '$lib/confirm.svelte';
 	import CopyButton from '$lib/components/CopyButton.svelte';
 	import { basicEmbedSnippet, deploymentEmbedSnippet, programmaticEmbedSnippet } from '$lib/embed';
 	import { timeAgo } from '$lib/format';
@@ -294,12 +295,12 @@
 			{:else if form?.action === 'regenerateKey' && form.success}
 				<div class="form-success">Client key regenerated. Update the embed snippet on your site.</div>
 			{/if}
-			<form method="POST" action="?/regenerateKey" class="row" use:enhance>
+			<form method="POST" action="?/regenerateKey" class="row" use:enhance={confirmSubmit({ title: 'Regenerate the client key?', message: 'Existing embeds stop working until they are updated with the new key.', confirmLabel: 'Regenerate key' })}>
 				<div style="flex: 1; min-width: 240px">
 					<strong>Regenerate client key</strong>
 					<p class="help">Existing embeds stop working until they are updated with the new key.</p>
 				</div>
-				<button class="btn" type="submit" onclick={(e) => { if (!confirm('Regenerate the client key? Existing embeds will stop working.')) e.preventDefault(); }}>Regenerate key</button>
+				<button class="btn" type="submit">Regenerate key</button>
 			</form>
 			<form method="POST" action="?/delete" class="row" use:enhance>
 				<div style="flex: 1; min-width: 240px">

@@ -17,6 +17,19 @@ import { computeSelector, computeXPath, describeElement, elementLabel, pageRect,
 import { captureViewport } from './screenshot';
 import { readLocal, readSession, writeLocal, writeSession } from './storage';
 
+export interface ConfirmOptions {
+	title: string;
+	message?: string;
+	confirmLabel?: string;
+	cancelLabel?: string;
+	/** Styles the confirm button as destructive (default true). */
+	danger?: boolean;
+}
+
+interface ConfirmRequest extends ConfirmOptions {
+	resolve: (ok: boolean) => void;
+}
+
 export interface ComposerTarget {
 	element: Element | null;
 	label: string;
@@ -107,6 +120,8 @@ export class WidgetController {
 		/** Cloudflare Turnstile site key when the server has bot protection configured. */
 		turnstileSiteKey: null as string | null,
 		toast: null as Toast | null,
+		/** Open confirmation dialog (`ConfirmDialog.svelte`), null when none. */
+		confirm: null as ConfirmRequest | null,
 		/** Pin that should draw attention (recently focused). */
 		highlightId: null as string | null,
 		/** Ticks whenever pins need to recompute their positions. */
@@ -597,6 +612,21 @@ export class WidgetController {
 		if (this.ui.selectedId === id) this.ui.detail = detail;
 		this.upsertPageItem(detail);
 		this.toast(status === 'resolved' ? `#${detail.number} resolved` : `#${detail.number} reopened`, 'success');
+	}
+
+	/** Shows the widget's confirmation dialog and resolves with the answer. */
+	confirm(options: ConfirmOptions): Promise<boolean> {
+		this.ui.confirm?.resolve(false);
+		return new Promise((resolve) => {
+			this.ui.confirm = { ...options, resolve };
+		});
+	}
+
+	/** Answers the open confirmation dialog (used by `ConfirmDialog.svelte`). */
+	answerConfirm(ok: boolean): void {
+		const pending = this.ui.confirm;
+		this.ui.confirm = null;
+		pending?.resolve(ok);
 	}
 
 	async remove(id: string): Promise<void> {

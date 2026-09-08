@@ -3,6 +3,7 @@
 	import type { WidgetController } from './lib/controller.svelte';
 	import AuthDialog from './components/AuthDialog.svelte';
 	import Composer from './components/Composer.svelte';
+	import ConfirmDialog from './components/ConfirmDialog.svelte';
 	import Launcher from './components/Launcher.svelte';
 	import Panel from './components/Panel.svelte';
 	import Picker from './components/Picker.svelte';
@@ -36,6 +37,9 @@
 			<AuthDialog />
 		{/if}
 		<Launcher />
+		{#if ui.confirm}
+			<ConfirmDialog />
+		{/if}
 		<Toast />
 	</div>
 {/if}

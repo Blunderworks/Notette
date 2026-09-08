@@ -118,7 +118,12 @@
 
 	async function remove() {
 		if (!item || busy) return;
-		if (!confirm(`Delete feedback #${item.number} and its replies?`)) return;
+		const ok = await c.confirm({
+			title: `Delete feedback #${item.number}?`,
+			message: 'The item, its replies and its screenshot will be permanently deleted.',
+			confirmLabel: 'Delete'
+		});
+		if (!ok || busy) return;
 		busy = true;
 		try {
 			await c.remove(item.id);

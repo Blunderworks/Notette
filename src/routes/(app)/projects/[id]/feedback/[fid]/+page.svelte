@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { confirmSubmit } from '$lib/confirm.svelte';
 	import CopyButton from '$lib/components/CopyButton.svelte';
 	import MentionText from '$lib/components/MentionText.svelte';
 	import MentionTextarea from '$lib/components/MentionTextarea.svelte';
@@ -51,7 +52,7 @@
 					{item.status === 'open' ? 'Resolve' : 'Reopen'}
 				</button>
 			</form>
-			<form method="POST" action="?/delete" use:enhance={({ cancel }) => { if (!confirm('Delete this feedback and its replies?')) cancel(); }}>
+			<form method="POST" action="?/delete" use:enhance={confirmSubmit({ title: `Delete feedback #${item.number}?`, message: 'The item, its replies and its screenshot will be permanently deleted.', confirmLabel: 'Delete' })}>
 				<button class="btn btn-danger" type="submit">Delete</button>
 			</form>
 		</div>
@@ -78,7 +79,7 @@
 							<span class="author">{comment.authorName ?? 'Anonymous'}</span>
 							{#if comment.isAdmin}<span class="badge admin">admin</span>{:else if comment.isMember}<span class="badge member">member</span>{/if}
 							<span title={comment.createdAt}>{formatDateTime(comment.createdAt)}</span>
-							<form method="POST" action="?/deleteComment" style="margin-left: auto" use:enhance={({ cancel }) => { if (!confirm('Delete this reply?')) cancel(); }}>
+							<form method="POST" action="?/deleteComment" style="margin-left: auto" use:enhance={confirmSubmit({ title: 'Delete this reply?', message: 'The reply will be permanently deleted.', confirmLabel: 'Delete' })}>
 								<input type="hidden" name="commentId" value={comment.id} />
 								<button class="btn btn-ghost btn-sm" type="submit">Delete</button>
 							</form>
