@@ -190,6 +190,15 @@ kbd {
 	resize: vertical;
 	min-height: 72px;
 }
+/* iOS Safari zooms the page into any focused field smaller than 16px. Keep
+   fields at 16px on touch devices so focusing only scrolls the field into view. */
+@media (hover: none) and (pointer: coarse) {
+	.nt-input,
+	.nt-textarea,
+	.nt-select {
+		font-size: 16px;
+	}
+}
 .nt-input::placeholder,
 .nt-textarea::placeholder {
 	color: var(--nt-text-3);

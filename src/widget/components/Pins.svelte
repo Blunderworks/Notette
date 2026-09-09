@@ -13,7 +13,7 @@
 	function recompute() {
 		const next: Record<string, PinPosition> = {};
 		const margin = 40;
-		for (const item of ui.pageItems) {
+		for (const item of c.visiblePageItems) {
 			const p = pinPosition(item);
 			if (!p) continue;
 			if (p.x < -margin || p.y < -margin || p.x > window.innerWidth + margin || p.y > window.innerHeight + margin) {
@@ -37,6 +37,7 @@
 	$effect(() => {
 		void ui.layoutTick;
 		void ui.pageItems.length;
+		void ui.statusFilter;
 		void ui.selectedId;
 		schedule();
 	});
@@ -64,7 +65,7 @@
 			style="left: {selectedRect.left}px; top: {selectedRect.top}px; width: {selectedRect.width}px; height: {selectedRect.height}px"
 		></div>
 	{/if}
-	{#each ui.pageItems as item (item.id)}
+	{#each c.visiblePageItems as item (item.id)}
 		{@const p = positions[item.id]}
 		{#if p}
 			<button

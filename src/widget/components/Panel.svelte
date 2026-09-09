@@ -10,7 +10,6 @@
 	const ui = c.ui;
 
 	let scope = $state<'page' | 'project'>(c.isAdmin ? 'project' : 'page');
-	let status = $state<FeedbackStatus | 'all'>('open');
 	let q = $state('');
 	let projectItems = $state<FeedbackSummaryDto[]>([]);
 	let loading = $state(false);
@@ -23,7 +22,7 @@
 	// Load project-wide items (admin only), debounced on filter changes.
 	$effect(() => {
 		if (scope !== 'project' || !c.isAdmin) return;
-		const currentStatus = status;
+		const currentStatus = ui.statusFilter;
 		const currentQ = q.trim();
 		let cancelled = false;
 		loading = true;
@@ -50,7 +49,7 @@
 		if (scope === 'project') return projectItems;
 		const needle = q.trim().toLowerCase();
 		return ui.pageItems.filter((i) => {
-			if (status !== 'all' && i.status !== status) return false;
+			if (ui.statusFilter !== 'all' && i.status !== ui.statusFilter) return false;
 			if (!needle) return true;
 			return (
 				i.body.toLowerCase().includes(needle) ||
@@ -85,7 +84,12 @@
 				<button type="button" role="tab" class:active={scope === 'page'} aria-selected={scope === 'page'} onclick={() => (scope = 'page')}>This page</button>
 			</div>
 		{/if}
-		<select class="nt-select" bind:value={status} aria-label="Status">
+		<select
+			class="nt-select"
+			value={ui.statusFilter}
+			onchange={(e) => c.setStatusFilter(e.currentTarget.value as FeedbackStatus | 'all')}
+			aria-label="Status"
+		>
 			<option value="open">Open</option>
 			<option value="resolved">Resolved</option>
 			<option value="all">All</option>
@@ -103,7 +107,7 @@
 			<div class="empty nt-faint">Loading…</div>
 		{:else if items.length === 0}
 			<div class="empty nt-faint">
-				{#if scope === 'page' && !c.isAdmin && q === '' && status === 'open'}
+				{#if scope === 'page' && !c.isAdmin && q === '' && ui.statusFilter === 'open'}
 					No open feedback on this page yet.
 				{:else}
 					Nothing matches.

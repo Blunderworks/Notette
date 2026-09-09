@@ -14,7 +14,7 @@ import type {
 import { ApiClient, NotetteApiError } from './api';
 import type { ResolvedConfig } from './config';
 import { computeSelector, computeXPath, describeElement, elementLabel, pageRect, pinPosition } from './dom';
-import { captureViewport } from './screenshot';
+import { captureViewport, currentViewport, type CaptureViewport, type Screenshot } from './screenshot';
 import { readLocal, readSession, writeLocal, writeSession } from './storage';
 
 export interface ConfirmOptions {
@@ -37,6 +37,14 @@ export interface ComposerTarget {
 	pageY: number;
 	relX: number | null;
 	relY: number | null;
+	/** Viewport and scroll position at the moment of the click. */
+	view: CaptureViewport;
+	/**
+	 * Screenshot started at click time (when the project allows screenshots)
+	 * so it shows the page as the reviewer saw it, before the composer, the
+	 * on-screen keyboard or the page's own scripts change anything.
+	 */
+	screenshot: Promise<Screenshot | null> | null;
 }
 
 /**
@@ -101,6 +109,8 @@ export class WidgetController {
 		expanded: false,
 		picking: false,
 		pinsVisible: true,
+		/** Status filter shared by the list and the pins; persisted per project. */
+		statusFilter: 'open' as FeedbackStatus | 'all',
 		panelOpen: false,
 		composer: null as ComposerTarget | null,
 		selectedId: null as string | null,
@@ -135,6 +145,8 @@ export class WidgetController {
 		this.token = readLocal<string | null>(this.storageKey('token'), null);
 		this.api = new ApiClient(config.host, config.key, () => this.token);
 		this.ui.pinsVisible = readLocal<boolean>(this.storageKey('pins'), true);
+		const storedStatus = readLocal<string>(this.storageKey('status'), 'open');
+		if (storedStatus === 'open' || storedStatus === 'resolved' || storedStatus === 'all') this.ui.statusFilter = storedStatus;
 		this.ui.expanded = config.open;
 	}
 
@@ -381,6 +393,18 @@ export class WidgetController {
 		else this.startPicking();
 	}
 
+	setStatusFilter(status: FeedbackStatus | 'all'): void {
+		this.ui.statusFilter = status;
+		writeLocal(this.storageKey('status'), status);
+	}
+
+	/** Page items that pass the status filter; the open thread's item always stays visible. */
+	get visiblePageItems(): FeedbackSummaryDto[] {
+		const status = this.ui.statusFilter;
+		if (status === 'all') return this.ui.pageItems;
+		return this.ui.pageItems.filter((i) => i.status === status || i.id === this.ui.selectedId);
+	}
+
 	togglePins(): void {
 		this.ui.pinsVisible = !this.ui.pinsVisible;
 		writeLocal(this.storageKey('pins'), this.ui.pinsVisible);
@@ -439,7 +463,11 @@ export class WidgetController {
 		}
 		this.ui.picking = false;
 		this.closeThread();
-		this.ui.composer = { element: target, label, pageX, pageY, relX, relY };
+		const view = currentViewport();
+		const screenshot = this.ui.project?.screenshotsEnabled
+			? captureViewport({ exclude: this.host, marker: { x: pageX, y: pageY }, viewport: view })
+			: null;
+		this.ui.composer = { element: target, label, pageX, pageY, relX, relY, view, screenshot };
 	}
 
 	cancelCompose(): void {
@@ -490,11 +518,11 @@ export class WidgetController {
 			page: {
 				url: location.href,
 				title: document.title || undefined,
-				viewportWidth: window.innerWidth,
-				viewportHeight: window.innerHeight,
+				viewportWidth: target.view.width,
+				viewportHeight: target.view.height,
 				devicePixelRatio: window.devicePixelRatio || 1,
-				scrollX: Math.round(window.scrollX),
-				scrollY: Math.round(window.scrollY),
+				scrollX: target.view.scrollX,
+				scrollY: target.view.scrollY,
 				userAgent: navigator.userAgent
 			},
 			click: { x: target.pageX, y: target.pageY },
@@ -517,10 +545,13 @@ export class WidgetController {
 
 		if (!this.isSignedIn) this.rememberAuthor(input.author);
 
-		// Screenshot capture happens before submission but never blocks it.
+		// The screenshot was started when the reviewer clicked; a missing one
+		// (composer opened before screenshots were enabled) is taken now instead.
+		// Either way it never blocks submission.
 		const wantScreenshot = input.screenshot && !!this.ui.project?.screenshotsEnabled;
 		const shot = wantScreenshot
-			? await captureViewport({ exclude: this.host, marker: { x: target.pageX, y: target.pageY } })
+			? await (target.screenshot ??
+					captureViewport({ exclude: this.host, marker: { x: target.pageX, y: target.pageY }, viewport: target.view }))
 			: null;
 
 		let created: Awaited<ReturnType<ApiClient['create']>>;
