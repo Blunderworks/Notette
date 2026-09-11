@@ -9,5 +9,5 @@ This file must be read in its entirety at the start of every task. It contains o
 3. **When adding a new feature or section**, add or update the corresponding section in ARCHITECTURE.md rather than leaving knowledge only in code comments or commit messages.
 4. **Keep this file general.** Do not add feature-specific instructions here — they belong in ARCHITECTURE.md, organized by section.
 5. **Verify before finishing.** Run `pnpm run check` and `pnpm test` after any code change, and `pnpm run build` when touching build configuration, the widget, or server routes. Fix what they report; do not leave known failures.
-6. **Use pnpm, never npm or yarn.** The project pins pnpm via `packageManager` in `package.json`; only `pnpm-lock.yaml` may exist as a lockfile, and scripts, docs, Dockerfile and workflows must invoke `pnpm`.
+6. **Use pnpm for JavaScript, never npm or yarn.** The project pins pnpm via `packageManager` in `package.json`; only `pnpm-lock.yaml` may be tracked as a lockfile, and JavaScript scripts, docs, Dockerfile and workflows must invoke `pnpm`. Packages for other ecosystems use their native tools; generated local lockfiles must be ignored.
 7. **Never commit secrets or local state.** `.env`, `data/`, `build/` and `.widget-dist/` are git-ignored on purpose; add new environment variables to `.env.example` instead.

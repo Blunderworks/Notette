@@ -95,6 +95,16 @@ Every route except `config` and `auth/*` starts with `requireWidgetViewer` (401 
 
 Rate limits (`src/lib/server/rate-limit.ts`, in-memory per process) apply to non-admin feedback creation and replies (keyed by user id when signed in, else IP), widget login/sign-up, auth request creation/polling and dashboard login. API handlers are wrapped in `api()` from `http.ts` so `ApiError`/zod errors become JSON `{ error: { message, code, details } }`.
 
+## Flutter widget
+
+The Flutter launcher supports touch/mouse dragging independently of tapping to open feedback. Its fractional position is held in overlay state (not persisted across remounts), retained across routes/form use, and laid out within safe-area and keyboard insets with a 16-pixel minimum margin. Resizing/rotation retains the relative position within the available space.
+
+`packages/notette_flutter/` is an independently versioned Flutter/Dart package. `NotetteFeedback` wraps the navigator via `MaterialApp.builder` (or the router equivalent), keeping a floating launcher and Material feedback form above routes. `NotetteClient` reuses the existing widget config, login/session, feedback creation and screenshot upload endpoints; no server or schema changes are required. Native clients send an explicit configured HTTP(S) Origin, which must be in the project's allow-list. Flutter web uses the browser origin. Origin/key identify a project/client, not a trusted native application identity; existing session, access and rate-limit enforcement remains authoritative.
+
+Feedback maps a host-provided current route to an HTTP(S) page URL under the origin, with logical viewport dimensions and JSON metadata. Optional screenshots use a RepaintBoundary before the form opens, with unchecked opt-in attachment and preview; the one-time upload token attaches PNG bytes after feedback creation. Capture failure permits text feedback; upload failure reports partial success without offering to resend the saved item. Native DOM selectors, element pins and scroll positions are not synthesized. This version does not implement threads, triage, mentions or sign-up UI.
+
+Inline login uses a per-user, in-memory widget token; caller owns/closes the client. A host-supplied Turnstile token provider is required for anonymous feedback and password login on protected instances. The package never weakens server protection. Full setup, platform networking requirements, limitations, an example and pub.dev publishing steps are in `packages/notette_flutter/README.md`. Publishing is independent of server releases. Verify Flutter changes with `flutter pub get`, `dart format --output=none --set-exit-if-changed lib test example/lib`, `flutter analyze`, `flutter test`, and `flutter pub publish --dry-run` in the package directory, in addition to the root pnpm checks. Ignore generated Dart lockfiles/caches/builds; only the root pnpm lockfile is tracked.
+
 ## Storage
 
 `src/lib/server/storage/index.ts` defines `StorageAdapter { put, open, delete }`; `local.ts` implements it on `NOTETTE_UPLOADS_DIR` with atomic writes and key validation (`projects/<projectId>/<uploadId>.<ext>`). `services/uploads.ts` is the only module that touches storage; deleting feedback or projects removes files best-effort before deleting rows. An S3 adapter would implement the same interface and be selected in `getStorage()`.

@@ -1,0 +1,14 @@
+name: notette_flutter
+description: A feedback overlay for Flutter apps using a self-hosted Notette server, with optional screenshots and reviewer sign-in.
+version: 0.1.0
+repository: https://github.com/blunderworks/notette/tree/main/packages/notette_flutter
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+  flutter: '>=3.22.0'
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.2.2
+dev_dependencies:
+  flutter_test:
+    sdk: flutter

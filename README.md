@@ -3,6 +3,7 @@
 Self-hosted, framework-agnostic preview feedback. Drop one `<script>` tag into any site and reviewers can click an element, leave a comment, and see existing feedback as pins on the page. Admins triage from the same widget or from a lightweight dashboard. Everything runs from a single Docker image plus PostgreSQL; there are no external services.
 
 - **Widget**: standalone browser bundle served by your Notette instance, rendered in a Shadow DOM so it never touches the host page's styles or behaviour.
+- **Flutter widget**: wrap a Flutter app with a native feedback overlay, optional screenshots and reviewer sign-in. See [Flutter installation, platform setup and publishing](packages/notette_flutter/README.md).
 - **Context captured**: URL, page title, viewport, scroll position, click position, CSS selector + XPath, element text/attributes, bounding box, user agent, viewport screenshot (never blocks submission), plus optional deployment metadata (environment, branch, commit, URL).
 - **Threads**: replies, open/resolved status, admin badges.
 - **On-site admin**: sign in from the widget (inline email/password, or approve from the dashboard; no third-party cookies), resolve/reopen/delete, browse feedback across all pages of a project and jump straight to each pin.
