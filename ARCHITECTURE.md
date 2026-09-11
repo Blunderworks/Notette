@@ -73,6 +73,7 @@ Base: `src/widget/`.
 ## Flutter widget
 
 Base: `packages/notette_flutter/lib/src/`.
+- Secure storage dependency permits 9.2.4–11.x; use only shared default-constructor/read/write/delete APIs. Host apps own native platform requirements and storage migration across majors.
 - `client.dart`: existing widget API; caller owns client; scoped session defaults to `flutter_secure_storage` (server/project/origin key), memory fallback; `persistSession: false` opts out; 401/logout clears storage. Native uses configured HTTP(S) origin; web uses browser origin. No trusted native identity implied.
 - `overlay.dart`: `NotetteFeedback` in MaterialApp builder above navigator; own Overlay ancestor for selection/tooltips. Drag stores fractional launcher position, survives routes/forms, resets on remount; safe-area/keyboard bounds with web margins (20px desktop, 12px narrow).
 - `action_bar.dart` (part): shared draggable launcher/toolbar/placement surface, bottom-right anchor expands up/left and clamps each animation frame to safe/keyboard bounds. Width measured with text scaling; overflow switches to Comment/Pins/List rows then account+close. Pill buttons use web colors/comment path. Placement instructions replace toolbar; bar hit testing stays above pin-tap interception.
