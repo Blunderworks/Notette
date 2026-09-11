@@ -73,6 +73,8 @@ export const projects = pgTable(
 		 * Only effective when email is configured (see `config.emailEnabled`).
 		 */
 		emailVerificationRequired: boolean('email_verification_required').notNull().default(false),
+		turnstileSiteKey: text('turnstile_site_key'),
+		turnstileSecretKey: text('turnstile_secret_key'),
 		feedbackSeq: integer('feedback_seq').notNull().default(0),
 		...timestamps
 	},

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:notette_flutter/src/turnstile.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -40,6 +41,7 @@ Future<void> open(WidgetTester tester, NotetteClient api,
 }
 
 void main() {
+  tearDown(() => debugTurnstileViewBuilder = null);
   testWidgets(
       'drag moves launcher without opening feedback; tap still opens it',
       (tester) async {
@@ -203,6 +205,7 @@ void main() {
   });
 
   testWidgets('does not bypass required bot verification', (tester) async {
+    debugTurnstileViewBuilder = (_) => const Text('Challenge placeholder');
     var posts = 0;
     final api = client(MockClient((request) async {
       if (request.method == 'POST') posts++;
@@ -213,7 +216,10 @@ void main() {
     await tester.tap(find.text('Send'));
     await tester.pumpAndSettle();
     expect(posts, 0);
-    expect(find.textContaining('Turnstile token provider'), findsOneWidget);
+    expect(find.text('Verify to continue'), findsOneWidget);
+    await tester.tap(find.text('Cancel verification'));
+    await tester.pumpAndSettle();
+    expect(find.text('My feedback'), findsOneWidget);
   });
 
   testWidgets(

@@ -31,7 +31,7 @@ export const POST = api(async (event) => {
 		});
 	}
 	const input = await readJson(event.request, widgetSignupSchema);
-	await requireTurnstile(event, input.turnstileToken);
+	await requireTurnstile(event, project, input.turnstileToken);
 
 	const requireVerification = project.emailVerificationRequired && config.emailEnabled;
 	let user;

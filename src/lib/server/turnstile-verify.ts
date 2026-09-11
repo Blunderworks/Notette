@@ -1,7 +1,7 @@
 /**
  * Cloudflare Turnstile server-side verification. Kept free of environment and
  * database imports so it can be unit-tested; `turnstile.ts` wires it to the
- * runtime configuration.
+ * project configuration.
  */
 
 export const TURNSTILE_VERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';

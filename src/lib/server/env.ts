@@ -61,16 +61,6 @@ export const config = {
 	get adminName(): string {
 		return env.NOTETTE_ADMIN_NAME?.trim() || 'Admin';
 	},
-	/** Cloudflare Turnstile site key (public). Bot protection is enabled only when both keys are set. */
-	get turnstileSiteKey(): string | null {
-		return env.TURNSTILE_SITE_KEY?.trim() || null;
-	},
-	get turnstileSecretKey(): string | null {
-		return env.TURNSTILE_SECRET_KEY?.trim() || null;
-	},
-	get turnstileEnabled(): boolean {
-		return !!(this.turnstileSiteKey && this.turnstileSecretKey);
-	},
 	/** Outgoing email (SMTP). Enabled only when both a host and a sender address are set. */
 	get smtpHost(): string | null {
 		return env.SMTP_HOST?.trim() || null;

@@ -11,7 +11,7 @@ import { createUser, getUserById, listUsers } from '$lib/server/services/users';
 import { emailSchema, passwordSchema } from '$lib/server/validation';
 import { isAdminRole } from '$lib/shared/roles';
 
-export const load: PageServerLoad = async ({ url, params, locals }) => {
+export const load: PageServerLoad = async ({ url, params, locals, parent }) => {
 	const [members, allUsers, emailNotifications] = await Promise.all([
 		listProjectMembers(params.id),
 		listUsers(),
@@ -21,7 +21,7 @@ export const load: PageServerLoad = async ({ url, params, locals }) => {
 	return {
 		created: url.searchParams.get('created') === '1',
 		emailConfigured: config.emailEnabled,
-		turnstileConfigured: config.turnstileEnabled,
+		turnstileConfigured: (await parent()).project.turnstileConfigured,
 		/** The signed-in admin's own preference for this project. */
 		emailNotifications,
 		members: members.map((m) => ({
@@ -39,6 +39,20 @@ export const load: PageServerLoad = async ({ url, params, locals }) => {
 };
 
 export const actions: Actions = {
+	turnstile: async ({ request, params, locals }) => {
+		if (!locals.user || !isAdminRole(locals.user.role)) return fail(403, { action: 'turnstile', errors: ['Admin access required.'] });
+		const form = await request.formData();
+		const project = await getProject(params.id);
+		if (!project) return fail(404, { action: 'turnstile', errors: ['Project not found.'] });
+		const remove = form.get('remove') === 'on';
+		const siteKey = String(form.get('siteKey') ?? '').trim();
+		const secretKey = String(form.get('secretKey') ?? '').trim() || project.turnstileSecretKey;
+		if (!remove && (!siteKey || !secretKey || siteKey.length > 256 || secretKey.length > 256)) {
+			return fail(400, { action: 'turnstile', errors: ['Enter both keys (maximum 256 characters each). Leave the secret blank only to keep a saved secret.'] });
+		}
+		await updateProject(params.id, { turnstileSiteKey: remove ? null : siteKey, turnstileSecretKey: remove ? null : secretKey });
+		return { action: 'turnstile', success: true };
+	},
 	update: async ({ request, params }) => {
 		const { values, errors } = parseProjectForm(await request.formData());
 		if (errors.length) return fail(400, { action: 'update', values, errors });

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
@@ -5,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
 import 'client.dart';
+import 'turnstile.dart';
 
 /// Place in MaterialApp.builder to keep feedback available across routes.
 class NotetteFeedback extends StatefulWidget {
@@ -31,7 +33,7 @@ class NotetteFeedback extends StatefulWidget {
   /// Enables an opt-in screenshot checkbox; nothing is uploaded without consent.
   final bool screenshots;
 
-  /// Host integration must obtain a fresh, single-use token for this site key.
+  /// Optional override for the built-in challenge. Return a fresh token per call.
   final Future<String> Function(String siteKey)? turnstileTokenProvider;
 
   @override
@@ -237,6 +239,8 @@ class _FeedbackFormState extends State<_FeedbackForm> {
   bool _busy = false;
   bool _attach = false;
   bool _signIn = false;
+  Completer<String?>? _verification;
+  Widget? _challengeView;
   bool get _signedIn => _config?['viewer'] != null;
   bool get _requiresLogin =>
       _config?['project']['anonymousFeedbackAllowed'] == false && !_signedIn;
@@ -249,6 +253,9 @@ class _FeedbackFormState extends State<_FeedbackForm> {
 
   @override
   void dispose() {
+    final verification = _verification;
+    if (verification != null && !verification.isCompleted)
+      verification.complete(null);
     for (final controller in [_body, _name, _email, _password]) {
       controller.dispose();
     }
@@ -256,6 +263,7 @@ class _FeedbackFormState extends State<_FeedbackForm> {
   }
 
   Future<void> _run(Future<void> Function() action) async {
+    if (_busy || !mounted) return;
     setState(() {
       _busy = true;
       _error = null;
@@ -274,19 +282,71 @@ class _FeedbackFormState extends State<_FeedbackForm> {
         if (mounted) setState(() => _config = config);
       });
 
-  Future<String?> _challenge() async {
+  Future<void> _refreshConfig() async {
+    final config = await widget.client.config();
+    if (!mounted) throw const NotetteException('Verification cancelled.');
+    if (config['viewer'] == null) widget.client.token = null;
+    setState(() => _config = config);
+  }
+
+  Future<String?> _challenge(String action) async {
     final key = _config?['turnstileSiteKey'] as String?;
-    if (key == null) return null;
-    if (widget.tokenProvider == null) {
-      throw const NotetteException(
-          'This server requires bot verification. The app must configure a Turnstile token provider.');
+    if (key == null || key.isEmpty) return null;
+    if (!mounted) throw const NotetteException('Verification cancelled.');
+    final pending = Completer<String?>();
+    _verification = pending;
+    setState(() => _challengeView = TurnstileChallenge(
+          key: UniqueKey(),
+          siteKey: key,
+          origin: widget.client.origin,
+          action: action,
+          provider: widget.tokenProvider,
+          onToken: (token) {
+            if (!pending.isCompleted) pending.complete(token);
+          },
+          onCancel: () {
+            if (!pending.isCompleted) pending.complete(null);
+          },
+        ));
+    try {
+      final token = await pending.future;
+      if (!mounted || token == null)
+        throw const NotetteException(
+            'Verification cancelled. Your draft has been kept.');
+      return token;
+    } finally {
+      _verification = null;
+      if (mounted) setState(() => _challengeView = null);
     }
-    return widget.tokenProvider!(key);
+  }
+
+  // Only a definitive Turnstile rejection is safe to automatically replay.
+  // Network failures may have saved feedback already; never replay those.
+  Future<T> _verified<T>(String action, Future<T> Function(String?) send,
+      {bool anonymousOnly = false}) async {
+    for (var attempt = 0;; attempt++) {
+      await _refreshConfig();
+      if (anonymousOnly && _requiresLogin) {
+        throw const NotetteException(
+            'Please sign in to send your feedback. Your draft has been kept.');
+      }
+      final token =
+          anonymousOnly && _signedIn ? null : await _challenge(action);
+      if (!mounted) throw const NotetteException('Verification cancelled.');
+      try {
+        return await send(token);
+      } on NotetteException catch (error) {
+        if (error.code != 'turnstile_failed' || attempt >= 1) rethrow;
+      }
+    }
   }
 
   Future<void> _login() => _run(() async {
-        await widget.client.login(_email.text, _password.text,
-            turnstileToken: await _challenge());
+        await _verified(
+            'login',
+            (token) => widget.client
+                .login(_email.text, _password.text, turnstileToken: token));
+        if (!mounted) return;
         _password.clear();
         final config = await widget.client.config();
         if (mounted)
@@ -299,13 +359,19 @@ class _FeedbackFormState extends State<_FeedbackForm> {
   Future<void> _submit() => _run(() async {
         if (_body.text.trim().isEmpty)
           throw const NotetteException('Please enter your feedback.');
-        final result = await widget.client.createFeedback({
-          'body': _body.text.trim(),
-          'page': widget.page,
-          'author': {'name': _name.text.trim(), 'email': _email.text.trim()},
-          'metadata': {'framework': 'flutter', ...widget.metadata},
-          if (!_signedIn) 'turnstileToken': await _challenge(),
-        });
+        final result = await _verified(
+            'feedback',
+            (token) => widget.client.createFeedback({
+                  'body': _body.text.trim(),
+                  'page': widget.page,
+                  'author': {
+                    'name': _name.text.trim(),
+                    'email': _email.text.trim()
+                  },
+                  'metadata': {'framework': 'flutter', ...widget.metadata},
+                  if (token != null) 'turnstileToken': token,
+                }),
+            anonymousOnly: true);
         var message = 'Feedback sent. Thank you!';
         if (_attach && widget.png != null && result['uploadToken'] != null) {
           try {
@@ -335,7 +401,9 @@ class _FeedbackFormState extends State<_FeedbackForm> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (_success != null)
+              if (_challengeView != null)
+                _challengeView!
+              else if (_success != null)
                 Text(_success!)
               else if (_config != null) ...[
                 if (login) ...[
@@ -401,7 +469,8 @@ class _FeedbackFormState extends State<_FeedbackForm> {
                   ],
                 ],
               ],
-              if (_busy) const LinearProgressIndicator(),
+              if (_busy && _challengeView == null)
+                const LinearProgressIndicator(),
               if (_error != null)
                 Text(_error!,
                     style:

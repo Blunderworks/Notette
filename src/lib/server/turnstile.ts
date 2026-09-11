@@ -1,24 +1,23 @@
 import type { RequestEvent } from '@sveltejs/kit';
-import { config } from '$lib/server/env';
+import type { Project } from '$lib/server/db/schema';
 import { ApiError, clientAddress } from '$lib/server/http';
 import { verifyTurnstileToken } from './turnstile-verify';
 
-/** Name of the form field the Turnstile widget fills in on dashboard pages. */
-export const TURNSTILE_FORM_FIELD = 'cf-turnstile-response';
+type TurnstileProject = Pick<Project, 'turnstileSiteKey' | 'turnstileSecretKey'>;
 
-export function turnstileSiteKey(): string | null {
-	return config.turnstileEnabled ? config.turnstileSiteKey : null;
+export function turnstileSiteKey(project: TurnstileProject): string | null {
+	return project.turnstileSiteKey && project.turnstileSecretKey ? project.turnstileSiteKey : null;
 }
 
 /**
  * Verifies a Turnstile token when bot protection is configured. Does nothing
  * when the keys are not set. Throws an ApiError with a user-facing message on
- * failure; dashboard form actions convert that into a `fail()`.
+ * failure.
  */
-export async function requireTurnstile(event: Pick<RequestEvent, 'getClientAddress'>, token: string | null | undefined): Promise<void> {
-	if (!config.turnstileEnabled) return;
+export async function requireTurnstile(event: Pick<RequestEvent, 'getClientAddress'>, project: TurnstileProject, token: string | null | undefined): Promise<void> {
+	if (!turnstileSiteKey(project)) return;
 	const result = await verifyTurnstileToken({
-		secret: config.turnstileSecretKey!,
+		secret: project.turnstileSecretKey!,
 		token,
 		remoteIp: clientAddress(event as RequestEvent)
 	});

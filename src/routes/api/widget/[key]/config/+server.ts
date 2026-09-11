@@ -22,7 +22,7 @@ export const GET = api(async (event) => {
 		},
 		viewer: user ? await widgetViewer(user, project.id) : null,
 		dashboardUrl: baseUrl(event),
-		turnstileSiteKey: turnstileSiteKey(),
+		turnstileSiteKey: turnstileSiteKey(project),
 		emailEnabled: config.emailEnabled
 	};
 	return json(dto, { headers: { 'Cache-Control': 'no-store' } });

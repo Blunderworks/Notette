@@ -40,6 +40,28 @@
 </svelte:head>
 
 <div class="stack">
+	<div class="card">
+		<div class="card-header"><h2>Bot protection</h2></div>
+		<form method="POST" action="?/turnstile" class="card-body stack" use:enhance>
+			<p class="help">Turnstile is {data.turnstileConfigured ? 'enabled' : 'disabled'} for this project. Protects anonymous feedback and replies, and widget sign-in and sign-up.</p>
+			{#if form?.action === 'turnstile'}
+				{#if form.errors}<div class="form-error">{form.errors.join(' ')}</div>{/if}
+				{#if form.success}<div class="form-success">Bot protection settings saved.</div>{/if}
+			{/if}
+			<div class="field">
+				<label class="label" for="siteKey">Turnstile site key</label>
+				<input class="input" id="siteKey" name="siteKey" value={project.turnstileSiteKey ?? ''} maxlength="256" autocomplete="off" />
+			</div>
+			<div class="field">
+				<label class="label" for="secretKey">Turnstile secret key</label>
+				<input class="input" id="secretKey" name="secretKey" type="password" maxlength="256" autocomplete="new-password" />
+				<p class="help">{data.turnstileConfigured ? 'A secret is saved. Leave blank to keep it, or enter a replacement.' : 'Enter the secret key from Cloudflare.'}</p>
+			</div>
+			<p class="help">Add each embedding site's hostname in Cloudflare → Turnstile → Hostnames, including localhost when testing. Host sites must allow https://challenges.cloudflare.com in their CSP script-src and frame-src.</p>
+			<label class="row"><input type="checkbox" name="remove" /> Disable Turnstile and remove both keys</label>
+			<button class="btn btn-primary" type="submit">Save bot protection</button>
+		</form>
+	</div>
 	{#if data.created}
 		<div class="form-success">Project created. Add the embed snippet below to your site to start collecting feedback.</div>
 	{/if}

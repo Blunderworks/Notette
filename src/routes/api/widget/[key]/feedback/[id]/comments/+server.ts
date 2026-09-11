@@ -27,7 +27,7 @@ export const POST = api(async (event) => {
 	}
 
 	const input = await readJson(event.request, commentCreateSchema, 50_000);
-	if (!user) await requireTurnstile(event, input.turnstileToken);
+	if (!user) await requireTurnstile(event, project, input.turnstileToken);
 
 	const mentions = await resolveMentions(user, project.id, input.mentions);
 	const comment = await addComment({

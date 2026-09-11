@@ -67,7 +67,7 @@ export const POST = api(async (event) => {
 
 	const input = await readJson(event.request, feedbackCreateSchema, 200_000);
 	// Bot protection applies to anonymous reviewers only; signed-in users already authenticated.
-	if (!user) await requireTurnstile(event, input.turnstileToken);
+	if (!user) await requireTurnstile(event, project, input.turnstileToken);
 
 	const pageOrigin = normalizeOrigin(input.page.url);
 	if (!pageOrigin || (pageOrigin !== origin && !isOriginAllowed(pageOrigin, project.allowedOrigins))) {

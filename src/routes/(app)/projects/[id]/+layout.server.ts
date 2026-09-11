@@ -13,6 +13,8 @@ export const load: LayoutServerLoad = async (event) => {
 		baseUrl: baseUrl(event),
 		project: {
 			id: project.id,
+			turnstileSiteKey: project.turnstileSiteKey,
+			turnstileConfigured: !!(project.turnstileSiteKey && project.turnstileSecretKey),
 			name: project.name,
 			clientKey: project.clientKey,
 			allowedOrigins: project.allowedOrigins,

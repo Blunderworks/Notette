@@ -1,12 +1,12 @@
 # Notette for Flutter
 
-A native Material feedback overlay that sends feedback to your existing self-hosted Notette dashboard. Wrap your app once to show a floating feedback button across routes. Includes optional screenshot previews, reviewer sign-in/sign-out, screen context and custom metadata. No WebView is needed for the feedback UI.
+A native Material feedback overlay that sends feedback to your existing self-hosted Notette dashboard. Wrap your app once to show a floating feedback button across routes. Includes optional screenshot previews, reviewer sign-in/sign-out, screen context and custom metadata.
 
 Drag the feedback button with a finger or mouse to move it out of the way; tap or click to open the form. Its position is retained while the overlay is mounted, including across routes and opening/closing the form. It stays within the safe area and adjusts to window resizing, rotation and the keyboard. The position resets when the overlay is recreated or the app restarts.
 
 ## Install from this repository
 
-Requires Flutter 3.22+ / Dart 3.4+. This package is not automatically published when the Notette server is released.
+Requires Flutter 3.24+ / Dart 3.5+.
 
 In your Flutter app's `pubspec.yaml`, use a local checkout:
 
@@ -29,16 +29,16 @@ dependencies:
       path: packages/notette_flutter
 ```
 
-Run `flutter pub get`. Once you have published the package on pub.dev, consumers can instead run `flutter pub add notette_flutter`.
+Run `flutter pub get`.
 
 ## Configure the server
 
 1. Create a project in Notette and copy its **client key** from the web embed snippet.
-2. For native apps, add a logical HTTPS origin such as `https://mobile.example.com` to that project's **Allowed origins**. Use the same origin in `appOrigin`. This identifies the app's feedback URLs; it does not need to serve a website. Native requests explicitly send this Origin header. Origins and client keys are public identifiers, not authentication secrets; native clients can set their own headers.
-3. For Flutter web, allow the actual deployed browser origin (and an explicit localhost development origin/port). The browser controls Origin; `appOrigin` is ignored on web, and screen URLs use `Uri.base.origin`.
+2. For native apps, add a logical HTTPS origin such as `https://mobile.example.com` to that project's **Allowed origins**. Use the same origin in `appOrigin`. This identifies the app's feedback URLs; it does not need to serve a website. Client keys are public identifiers; require sign-in to restrict who can leave feedback.
+3. For Flutter web, allow the actual deployed browser origin (and an explicit localhost development origin/port). On web, the browser address is used instead of `appOrigin`.
 4. Enable anonymous feedback or add your reviewers as project members. When anonymous feedback is disabled, the overlay requires Notette sign-in. Existing account and email-verification requirements still apply.
 
-No server changes or database migration are needed. Use a server reachable from the device: `localhost` on a phone is the phone itself. Prefer HTTPS for deployed apps.
+Use a server reachable from the device: `localhost` on a phone is the phone itself. Prefer HTTPS for deployed apps.
 
 ## Wrap your app
 
@@ -69,7 +69,7 @@ MaterialApp(
 );
 ```
 
-See [example/lib/main.dart](example/lib/main.dart) for a complete example with lifecycle management. To run it, copy that file into a `flutter create` app, add the dependency above, and replace the server/key/origin. The example directory also has a pubspec for analysis; generated platform runners are intentionally omitted.
+See [example/lib/main.dart](example/lib/main.dart) for a complete example with lifecycle management. To run it, copy that file into a `flutter create` app, add the dependency above, and replace the server/key/origin.
 
 For multiple screens, connect `screenPath` to your router's current path or to state maintained by a `NavigatorObserver`. The callback is evaluated when feedback opens. Return a root-relative path such as `/settings/profile`; it becomes `https://mobile.example.com/settings/profile` in the dashboard. Native links are logical screen identifiers, not automatically configured deep links. Do not put private data in route query parameters. Viewport dimensions use Flutter logical pixels; the snapshot uses one image pixel per logical pixel. No DOM selector, element pin or scroll offset is inferred for native widgets.
 
@@ -84,35 +84,20 @@ For multiple screens, connect `screenPath` to your router's current path or to s
 - iOS: use HTTPS to work with App Transport Security. Screenshots use Flutter rendering and need no photo-library permission. Windows/Linux use normal network access.
 - Web: allow the browser origin in Notette, use HTTPS to avoid mixed-content blocking, and permit your Notette host in the application's CSP `connect-src`.
 
-The package uses portable Flutter and HTTP APIs. Widget tests do not substitute for a device smoke test on each platform you ship.
-
 ## Authentication and Turnstile
 
-The overlay supports inline sign-in for existing Notette accounts, with a session held in memory on the client. It does not persist credentials. Sign out revokes the session on the server. Account creation and email confirmation take place outside this package; create/invite members using Notette's dashboard or existing web sign-up flow.
+The overlay supports inline sign-in for existing Notette accounts, without saving their password. Sign out revokes the session on the server. Account creation and email confirmation take place outside this package; create/invite members using Notette's dashboard or existing web sign-up flow.
 
-If the instance has Turnstile configured, anonymous submissions and all password sign-ins require a fresh challenge token. Supply `turnstileTokenProvider: (siteKey) async => ...` using your host app's Turnstile integration. It must present a real challenge on a Cloudflare-allowed hostname and return a fresh token for every call (including retries). No Turnstile secret belongs in the app. Without a provider, these actions display a configuration error; the package does not bypass protection. There is no bundled native Turnstile challenge view in this version.
+When the project has Turnstile configured, `NotetteFeedback` automatically presents a challenge for anonymous feedback and password sign-in. Consuming apps only configure `NotetteClient` and wrap their app in `NotetteFeedback`; no challenge code, site key, or secret is needed in the app. The server supplies the public site key. Native challenges use the client's `appOrigin`; web challenges use the browser origin. Add that hostname to the Turnstile widget in Cloudflare and allow the origin in Notette.
 
-Apps integrating a separate Notette approval flow can set `client.token` to a per-user **widget** session issued for this exact project and origin. Your application's own login token cannot be used. Never ship a shared admin token. Signed-in submissions skip Turnstile, as with the existing web widget. Invalid/expired sessions are re-evaluated by the server; reopen the form to refresh sign-in state.
+If verification fails, expires or takes too long, choose **Retry verification** or **Cancel verification**. Your draft is kept. Notette may ask you to verify again before sending. If a connection error leaves you unsure whether feedback was sent, check the dashboard before retrying.
 
-## Publish to pub.dev
+`turnstileTokenProvider: (siteKey) async => ...` remains an optional override for apps with their own challenge presentation. It must return a fresh non-empty token per call; errors, invalid tokens and timeouts stay inside the verification flow. No Turnstile secret belongs in an app.
 
-Publishing is a separate maintainer action; these instructions do not publish anything automatically.
+Built-in presentation supports Android, iOS, macOS, Windows and web. Linux has no bundled WebView implementation; protected actions show an explanatory error unless the optional provider is supplied. Windows needs WebView2 and the WebView plugin's build prerequisites; Apple targets require iOS 12+ / macOS 10.14+. See [native WebView setup](https://inappwebview.dev/docs/intro/) for build requirements. Flutter web loads Cloudflare's script automatically; permit `https://challenges.cloudflare.com` in CSP `script-src` and `frame-src`. No manual script injection or web bridge setup is required.
 
-1. Confirm you own the package name `notette_flutter` on pub.dev or choose an available name. If renamed, update the pubspec, imports, example and documentation. Check the repository URL, MIT license ownership and release version; update `CHANGELOG.md` for each release.
-2. In `packages/notette_flutter`, run:
+Apps integrating a separate Notette approval flow can set `client.token` to a per-user **widget** session issued for this exact project and origin. Your application's own login token cannot be used. Never ship a shared admin token. Signed-in submissions skip Turnstile, as with the existing web widget. Configuration is refreshed before each action, including expired-session and sign-in requirement changes.
 
-   ```sh
-   flutter pub get
-   dart format --output=none --set-exit-if-changed lib test example/lib
-   flutter analyze
-   flutter test
-   flutter pub publish --dry-run
-   ```
+## Available features
 
-3. Inspect the dry-run file list and resolve warnings. `.pubignore` excludes caches, builds and local lockfiles. Keep the example, tests, README, changelog and license.
-4. Sign in with the Google account or verified publisher that should own this package, then run `flutter pub publish` and review its confirmation. Follow the authentication link if prompted. Published versions are immutable; bump the pubspec version for each new release.
-5. After publication, test a fresh app using `flutter pub add notette_flutter` and the setup above.
-
-Flutter dependencies use Flutter/Dart's native pub tooling; the Notette JavaScript server continues to use pnpm. Consult the official [Flutter package guide](https://docs.flutter.dev/packages-and-plugins/developing-packages) and [Dart publishing guide](https://dart.dev/tools/pub/publishing) for publisher setup and release requirements.
-
-This initial package collects feedback. Thread browsing/replies, element picking, admin triage, mentions and sign-up remain available in the web widget/dashboard.
+The Flutter widget collects feedback. Thread browsing, replies, element picking, admin triage, mentions and sign-up are available in the web widget and dashboard.

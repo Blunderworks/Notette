@@ -1,72 +1,8 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { onMount } from 'svelte';
-	import { loadTurnstile, type TurnstileApi } from '$lib/shared/turnstile-client';
 
 	let { data, form } = $props();
 	let submitting = $state(false);
-	let turnstileToken = $state('');
-	let turnstileFailed = $state(false);
-	let turnstileError = $state<string | null>(null);
-	let turnstileContainer = $state<HTMLDivElement | null>(null);
-	let turnstileApi: TurnstileApi | null = null;
-	let turnstileId: string | null = null;
-
-	const needsTurnstile = $derived(!!data.turnstileSiteKey);
-	const canSubmit = $derived(!submitting && (!needsTurnstile || !!turnstileToken));
-
-	// Explicit rendering keeps the challenge working across client-side navigations.
-	onMount(() => {
-		const siteKey = data.turnstileSiteKey;
-		if (!siteKey || !turnstileContainer) return;
-		let cancelled = false;
-		loadTurnstile()
-			.then((api) => {
-				if (cancelled || !turnstileContainer) return;
-				turnstileApi = api;
-				turnstileId = api.render(turnstileContainer, {
-					sitekey: siteKey,
-					appearance: 'interaction-only',
-					size: 'flexible',
-					action: 'login',
-					callback: (token) => (turnstileToken = token),
-					'expired-callback': () => (turnstileToken = ''),
-					'timeout-callback': () => (turnstileToken = ''),
-					'error-callback': (code) => {
-						console.warn('[notette] Turnstile error', code ?? 'unknown');
-						turnstileError = code ?? null;
-						turnstileToken = '';
-						turnstileFailed = true;
-						return true;
-					}
-				});
-			})
-			.catch((err) => {
-				console.warn('[notette] Turnstile script failed to load', err);
-				turnstileFailed = true;
-			});
-		return () => {
-			cancelled = true;
-			if (turnstileApi && turnstileId) {
-				try {
-					turnstileApi.remove(turnstileId);
-				} catch {
-					/* already gone */
-				}
-			}
-		};
-	});
-
-	function resetTurnstile() {
-		turnstileToken = '';
-		if (turnstileApi && turnstileId) {
-			try {
-				turnstileApi.reset(turnstileId);
-			} catch {
-				/* ignore */
-			}
-		}
-	}
 </script>
 
 <svelte:head>
@@ -101,8 +37,6 @@
 					return async ({ update }) => {
 						submitting = false;
 						await update();
-						// Turnstile tokens are single-use; a failed attempt needs a fresh one.
-						resetTurnstile();
 					};
 				}}
 			>
@@ -115,31 +49,10 @@
 					<label class="label" for="password">Password</label>
 					<input class="input" id="password" name="password" type="password" autocomplete="current-password" required />
 				</div>
-				{#if needsTurnstile}
-					<input type="hidden" name="cf-turnstile-response" value={turnstileToken} />
-					<div class="turnstile" bind:this={turnstileContainer}></div>
-					{#if turnstileFailed}
-						<div class="form-error">
-							{#if turnstileError?.startsWith('1102')}
-								This hostname is not allowed for the Turnstile site key (error {turnstileError}). Add it under
-								Cloudflare → Turnstile → the widget's hostnames.
-							{:else}
-								The verification challenge could not load{#if turnstileError} (Turnstile error {turnstileError}){/if}.
-								Reload the page and try again.
-							{/if}
-						</div>
-					{/if}
-				{/if}
-				<button class="btn btn-primary btn-block" type="submit" disabled={!canSubmit}>
-					{#if submitting}Signing in…{:else if needsTurnstile && !turnstileToken && !turnstileFailed}Verifying…{:else}Sign in{/if}
+				<button class="btn btn-primary btn-block" type="submit" disabled={submitting}>
+					{#if submitting}Signing in…{:else}Sign in{/if}
 				</button>
 			</form>
 		</div>
 	</div>
 </div>
-
-<style>
-	.turnstile:empty {
-		display: none;
-	}
-</style>

@@ -5,18 +5,17 @@ import { verifyPassword } from '$lib/server/auth/password';
 import { createSession } from '$lib/server/auth/sessions';
 import { baseUrl } from '$lib/server/base-url';
 import { config } from '$lib/server/env';
-import { ApiError, clientAddress } from '$lib/server/http';
+import { clientAddress } from '$lib/server/http';
 import { rateLimit } from '$lib/server/rate-limit';
 import { safeRedirectTarget } from '$lib/server/redirect';
 import { resendVerificationEmail } from '$lib/server/services/email-verification';
 import { countUsers, getUserByEmail } from '$lib/server/services/users';
-import { requireTurnstile, TURNSTILE_FORM_FIELD, turnstileSiteKey } from '$lib/server/turnstile';
 
 export const load: PageServerLoad = async ({ locals, url }) => {
 	const redirectTo = safeRedirectTarget(url.searchParams.get('redirect'));
 	if (locals.user) redirect(303, redirectTo);
 	if ((await countUsers()) === 0) redirect(303, '/setup');
-	return { redirectTo, turnstileSiteKey: turnstileSiteKey() };
+	return { redirectTo };
 };
 
 /** Shape of every failed login attempt, spelled out so TypeScript keeps `unverified` in the form data type. */
@@ -43,12 +42,6 @@ export const actions: Actions = {
 		}
 		if (!email || !password) {
 			return loginFailure(400, { email, error: 'Email and password are required.' });
-		}
-		try {
-			await requireTurnstile(event, String(form.get(TURNSTILE_FORM_FIELD) ?? ''));
-		} catch (err) {
-			if (err instanceof ApiError) return loginFailure(err.status, { email, error: err.message });
-			throw err;
 		}
 
 		const user = await getUserByEmail(email);

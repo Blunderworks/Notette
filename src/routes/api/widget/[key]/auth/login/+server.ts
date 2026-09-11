@@ -24,7 +24,7 @@ export const POST = api(async (event) => {
 		});
 	}
 	const input = await readJson(event.request, widgetLoginSchema);
-	await requireTurnstile(event, input.turnstileToken);
+	await requireTurnstile(event, project, input.turnstileToken);
 
 	const user = await getUserByEmail(input.email);
 	const valid = user ? await verifyPassword(input.password, user.passwordHash) : false;

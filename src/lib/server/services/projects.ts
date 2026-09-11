@@ -11,6 +11,8 @@ export interface ProjectWithCounts extends Project {
 }
 
 export interface ProjectInput {
+	turnstileSiteKey?: string | null;
+	turnstileSecretKey?: string | null;
 	name: string;
 	allowedOrigins: string[];
 	publicFeedbackVisible: boolean;
