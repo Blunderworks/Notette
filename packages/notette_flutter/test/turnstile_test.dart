@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:cloudflare_turnstile/cloudflare_turnstile.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/testing.dart';
 import 'package:notette_flutter/notette_flutter.dart';
@@ -13,6 +14,7 @@ import 'notette_flutter_test.dart' as helpers;
 void main() {
   late CloudflareTurnstile view;
   setUp(() {
+    SharedPreferences.setMockInitialValues({});
     debugTurnstileViewBuilder = (widget) {
       view = widget;
       return const SizedBox(width: 150, height: 140, child: Text('Challenge'));
@@ -71,7 +73,7 @@ void main() {
     await tester.enterText(
         find.byType(TextField).first, 'reviewer@example.com');
     await tester.enterText(find.byType(TextField).last, 'password');
-    await tester.tap(find.text('Sign in'));
+    await tester.tap(find.text('Sign in').last);
     await tester.pumpAndSettle();
     expect(view.action, 'login');
     view.onTokenReceived!('login-token');
@@ -215,7 +217,9 @@ void main() {
     await tester.pumpWidget(MaterialApp(
       builder: (_, child) => NotetteFeedback(
           client: api,
+          initiallyOpen: true,
           screenPath: () => '/',
+          screenshots: false,
           turnstileTokenProvider: (key) async {
             expect(key, 'site-key');
             calls++;
@@ -224,7 +228,10 @@ void main() {
           child: child!),
       home: const Scaffold(),
     ));
-    await tester.tap(find.byTooltip('Send feedback'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Comment'));
+    await tester.pumpAndSettle();
+    await tester.tapAt(const Offset(200, 200));
     await tester.pumpAndSettle();
     await send(tester);
     expect(tokens, isEmpty);

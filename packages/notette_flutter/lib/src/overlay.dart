@@ -1,12 +1,21 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'client.dart';
 import 'turnstile.dart';
+
+part 'panels.dart';
+part 'form.dart';
+part 'action_bar.dart';
 
 /// Place in MaterialApp.builder to keep feedback available across routes.
 class NotetteFeedback extends StatefulWidget {
@@ -16,11 +25,35 @@ class NotetteFeedback extends StatefulWidget {
       required this.child,
       required this.screenPath,
       this.screenTitle,
+      this.controller,
+      this.initiallyOpen = false,
+      this.position = Alignment.bottomRight,
+      this.user = const {},
+      this.deployment = const {},
+      this.onNavigate,
+      this.openUrl,
+      this.initialFeedbackId,
+      this.resolvePin,
       this.metadata = const {},
       this.enabled = true,
-      this.screenshots = false,
+      this.screenshots = true,
       this.turnstileTokenProvider});
 
+  final NotetteController? controller;
+  final bool initiallyOpen;
+  final Alignment position;
+  final Map<String, String> user;
+  final Map<String, String> deployment;
+
+  /// Called only on explicit navigation to feedback on another native screen.
+  final Future<void> Function(String path)? onNavigate;
+
+  /// Override the system browser (e.g. for an application's link handler).
+  final Future<bool> Function(Uri url)? openUrl;
+  final String? initialFeedbackId;
+
+  /// Optional native anchor lookup; return logical screen coordinates.
+  final Offset? Function(Map<String, dynamic> item, Size viewport)? resolvePin;
   final NotetteClient client;
   final Widget child;
 
@@ -30,7 +63,7 @@ class NotetteFeedback extends StatefulWidget {
   final Map<String, Object?> metadata;
   final bool enabled;
 
-  /// Enables an opt-in screenshot checkbox; nothing is uploaded without consent.
+  /// Enables screenshot attachments, with a remembered user checkbox preference.
   final bool screenshots;
 
   /// Optional override for the built-in challenge. Return a fresh token per call.
@@ -43,13 +76,314 @@ class NotetteFeedback extends StatefulWidget {
 class _NotetteFeedbackState extends State<NotetteFeedback> {
   final _boundary = GlobalKey();
   bool _opening = false;
+  int _captureGeneration = 0;
+  bool _placing = false;
+  bool _includeScreenshot = true;
+  static const _screenshotPreference = 'notette.includeScreenshot';
+  Future<void>? _preferenceWrite;
   Widget? _dialog;
+  bool _expanded = false;
+  bool _activating = false;
+  bool _pinsVisible = true;
+  String _status = 'open';
+  String _path = '';
+  String? _error;
+  Map<String, dynamic>? _config;
+  List<Map<String, dynamic>> _items = [];
+  Timer? _pathTimer;
+  int _loadGeneration = 0;
+  String? _pendingFocus;
+  bool _ready = false;
+  bool get _admin => _config?['viewer']?['admin'] == true;
+  bool get _canSee =>
+      _admin ||
+      (_config?['project']?['publicFeedbackVisible'] == true &&
+          (_config?['project']?['anonymousFeedbackAllowed'] != false ||
+              _config?['viewer'] != null));
+
+  @override
+  void initState() {
+    super.initState();
+    _launcherPosition = Offset(widget.position.x < 0 ? 0 : 1, 1);
+    widget.controller?._state = this;
+    _pendingFocus = widget.initialFeedbackId ??
+        (kIsWeb ? Uri.base.queryParameters['notette'] : null);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && (widget.initiallyOpen || _pendingFocus != null)) _expand();
+    });
+    _pathTimer = Timer.periodic(const Duration(milliseconds: 750), (_) {
+      if (!mounted || !_ready || !widget.enabled) return;
+      try {
+        final path = widget.screenPath();
+        if (path != _path) {
+          _path = path;
+          _items = [];
+          if (_dialog is _BrowsePanel) _browse();
+          _reload();
+        }
+      } catch (_) {/* A router may briefly have no current route. */}
+    });
+  }
+
+  @override
+  void didUpdateWidget(NotetteFeedback oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller?._state = null;
+      widget.controller?._state = this;
+    }
+    if (oldWidget.client != widget.client) {
+      _loadGeneration++;
+      _captureGeneration++;
+      _ready = false;
+      _config = null;
+      _items = [];
+      _dialog = null;
+      _placing = false;
+      if (_expanded) _expand();
+    }
+    if (!widget.enabled) {
+      _captureGeneration++;
+      _dialog = null;
+      _placing = false;
+      _expanded = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    _pathTimer?.cancel();
+    widget.controller?._state = null;
+    super.dispose();
+  }
+
+  Future<void> _activateLauncher() async {
+    if (_activating) return;
+    setState(() => _activating = true);
+    try {
+      await _expand();
+      if (!mounted || !widget.enabled) return;
+      if (_config != null && _config!['viewer'] == null) {
+        setState(() => _expanded = false);
+        _showForm(authOnly: true);
+      }
+    } finally {
+      if (mounted) setState(() => _activating = false);
+    }
+  }
+
+  Future<void> _expand() async {
+    setState(() {
+      _expanded = true;
+      _error = null;
+    });
+    final client = widget.client;
+    if (!_ready) {
+      await client.restoreSession();
+      if (!mounted || widget.client != client || !widget.enabled) return;
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        _status =
+            prefs.getString('${widget.client.storageKey}:status') ?? 'open';
+        if (!['open', 'resolved', 'all'].contains(_status)) _status = 'open';
+        _pinsVisible =
+            prefs.getBool('${widget.client.storageKey}:pins') ?? true;
+      } catch (_) {}
+      if (!mounted) return;
+      _ready = true;
+    }
+    await _reload();
+    if (mounted && _pendingFocus != null) {
+      if (_config?['viewer'] == null &&
+          _config?['project']?['anonymousFeedbackAllowed'] == false) {
+        _showForm(authOnly: true);
+      } else {
+        final id = _pendingFocus!;
+        _pendingFocus = null;
+        _focus(id);
+      }
+    }
+  }
+
+  Future<void> _reload() async {
+    final generation = ++_loadGeneration;
+    try {
+      final path = widget.screenPath();
+      final config = await widget.client.config();
+      if (!mounted || generation != _loadGeneration) return;
+      if (config['viewer'] == null && widget.client.token != null) {
+        widget.client.token = null;
+        await widget.client.saveSession();
+      }
+      if (!mounted || generation != _loadGeneration) return;
+      setState(() {
+        _config = config;
+        _path = path;
+        _error = null;
+      });
+      final items =
+          _canSee ? await widget.client.listFeedback(path) : {'items': []};
+      if (!mounted ||
+          generation != _loadGeneration ||
+          widget.screenPath() != path) return;
+      setState(() => _items = _maps(items['items']));
+    } catch (e) {
+      if (mounted && generation == _loadGeneration)
+        setState(() => _error = '$e');
+    }
+  }
+
+  void _collapse() => setState(() {
+        _expanded = false;
+        _dialog = null;
+        _placing = false;
+      });
+  void _closeDialog() {
+    if (!mounted) return;
+    setState(() => _dialog = null);
+  }
+
+  Future<void> _setStatusFilter(String value) async {
+    setState(() => _status = value);
+    try {
+      await (await SharedPreferences.getInstance())
+          .setString('${widget.client.storageKey}:status', value);
+    } catch (_) {}
+  }
+
+  void _togglePins() {
+    setState(() => _pinsVisible = !_pinsVisible);
+    () async {
+      try {
+        await (await SharedPreferences.getInstance())
+            .setBool('${widget.client.storageKey}:pins', _pinsVisible);
+      } catch (_) {}
+    }();
+  }
+
+  void _browse() {
+    if (!_canSee) return;
+    setState(() {
+      _placing = false;
+      _dialog = _BrowsePanel(
+        key: UniqueKey(),
+        client: widget.client,
+        path: _path,
+        config: _config!,
+        status: _status,
+        onStatus: _setStatusFilter,
+        onSelect: _focus,
+        onClose: _closeDialog,
+      );
+    });
+  }
+
+  Future<void> _focus(String id) async {
+    if (!_ready) {
+      _pendingFocus = id;
+      await _expand();
+      return;
+    }
+    if (_config?['project']?['anonymousFeedbackAllowed'] == false &&
+        _config?['viewer'] == null) {
+      _pendingFocus = id;
+      _showForm(authOnly: true);
+      return;
+    }
+    setState(() => _expanded = true);
+    _showForm(detailId: id);
+  }
+
+  void _showForm({bool authOnly = false, String? detailId}) {
+    setState(() {
+      _placing = false;
+      _dialog = _FeedbackForm(
+        key: UniqueKey(),
+        client: widget.client,
+        page: const {},
+        metadata: widget.metadata,
+        png: null,
+        pin: Offset.zero,
+        includeScreenshot: _includeScreenshot,
+        onScreenshotChanged: _rememberScreenshot,
+        tokenProvider: widget.turnstileTokenProvider,
+        onClose: _closeDialog,
+        onChanged: _changed,
+        authOnly: authOnly,
+        alignment: widget.position,
+        detailId: detailId,
+        user: widget.user,
+        deployment: widget.deployment,
+        openUrl: widget.openUrl,
+        onNavigate: widget.onNavigate,
+      );
+    });
+  }
+
+  void _changed() {
+    _reload().then((_) {
+      if (!mounted) return;
+      if (_config?['viewer'] != null) setState(() => _expanded = true);
+      if (_pendingFocus != null && _config?['viewer'] != null) {
+        final id = _pendingFocus!;
+        _pendingFocus = null;
+        _focus(id);
+      }
+    });
+  }
+
+  void _account() {
+    if (_config?['viewer'] == null) {
+      _showForm(authOnly: true);
+      return;
+    }
+    setState(() => _dialog = _AccountPanel(
+        client: widget.client,
+        config: _config!,
+        onClose: _closeDialog,
+        onChanged: _changed,
+        onSignOut: () {
+          _closeDialog();
+          setState(() {
+            _items = [];
+            _config?['viewer'] = null;
+            if (_config?['project']?['anonymousFeedbackAllowed'] == false)
+              _expanded = false;
+          });
+          _reload();
+        }));
+  }
+
   // Fractional travel keeps the chosen position on screen after resizing.
   Offset _launcherPosition = const Offset(1, 1);
 
-  Future<void> _open() async {
+  void _placePin() {
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() {
+      _placing = true;
+      _dialog = null;
+    });
+  }
+
+  void _rememberScreenshot(bool value) {
+    _includeScreenshot = value;
+    _preferenceWrite = (_preferenceWrite ?? Future.value()).then((_) async {
+      try {
+        final preferences = await SharedPreferences.getInstance();
+        await preferences.setBool(_screenshotPreference, value);
+      } catch (_) {
+        // Keep the choice for this overlay if device storage is unavailable.
+      }
+    });
+  }
+
+  Future<void> _open(Offset pin) async {
     if (_opening || _dialog != null) return;
-    setState(() => _opening = true);
+    final generation = ++_captureGeneration;
+    setState(() {
+      _opening = true;
+      _placing = false;
+    });
     try {
       final path = widget.screenPath();
       if (!path.startsWith('/') ||
@@ -72,15 +406,31 @@ class _NotetteFeedbackState extends State<NotetteFeedback> {
         'userAgent': 'Flutter/${kIsWeb ? 'web' : defaultTargetPlatform.name}',
       };
       Uint8List? png;
-      if (widget.screenshots) {
+      if (widget.screenshots &&
+          _config?['project']?['screenshotsEnabled'] != false) {
         try {
           final boundary = _boundary.currentContext!.findRenderObject()
               as RenderRepaintBoundary;
           final image = await boundary.toImage(pixelRatio: 1);
           try {
-            final bytes =
-                await image.toByteData(format: ui.ImageByteFormat.png);
-            png = bytes?.buffer.asUint8List();
+            final recorder = ui.PictureRecorder();
+            final canvas = Canvas(recorder)
+              ..drawImage(image, Offset.zero, Paint());
+            canvas.drawCircle(pin, 10, Paint()..color = Colors.white);
+            canvas.drawCircle(pin, 7, Paint()..color = const Color(0xff4f46e5));
+            final picture = recorder.endRecording();
+            try {
+              final marked = await picture.toImage(image.width, image.height);
+              try {
+                final bytes =
+                    await marked.toByteData(format: ui.ImageByteFormat.png);
+                png = bytes?.buffer.asUint8List();
+              } finally {
+                marked.dispose();
+              }
+            } finally {
+              picture.dispose();
+            }
           } finally {
             image.dispose();
           }
@@ -89,11 +439,31 @@ class _NotetteFeedbackState extends State<NotetteFeedback> {
         }
       }
       if (!mounted) return;
+      if (_preferenceWrite != null) await _preferenceWrite;
+      try {
+        final preferences = await SharedPreferences.getInstance();
+        _includeScreenshot =
+            preferences.getBool(_screenshotPreference) ?? _includeScreenshot;
+      } catch (_) {
+        // Feedback remains available without device storage.
+      }
+      if (!mounted || !widget.enabled || generation != _captureGeneration)
+        return;
       setState(() => _dialog = _FeedbackForm(
+            key: UniqueKey(),
             client: widget.client,
+            onChanged: _changed,
+            alignment: widget.position,
+            user: widget.user,
+            deployment: widget.deployment,
+            openUrl: widget.openUrl,
+            onNavigate: widget.onNavigate,
             page: page,
             metadata: Map.of(widget.metadata),
             png: png,
+            pin: pin,
+            includeScreenshot: _includeScreenshot,
+            onScreenshotChanged: _rememberScreenshot,
             tokenProvider: widget.turnstileTokenProvider,
             onClose: () {
               if (mounted) setState(() => _dialog = null);
@@ -120,65 +490,149 @@ class _NotetteFeedbackState extends State<NotetteFeedback> {
   Widget build(BuildContext context) => _OverlayHost(
           child: Stack(fit: StackFit.expand, children: [
         ExcludeFocus(
-            excluding: _dialog != null,
+            excluding: _dialog != null || _placing || _opening,
             child: ExcludeSemantics(
-                excluding: _dialog != null,
+                excluding: _dialog != null || _placing || _opening,
                 child: RepaintBoundary(key: _boundary, child: widget.child))),
-        if (widget.enabled)
-          Positioned.fill(
-            child: Padding(
-              padding: MediaQuery.viewInsetsOf(context),
-              child: SafeArea(
-                minimum: const EdgeInsets.all(16),
-                child: LayoutBuilder(builder: (context, constraints) {
-                  const size = 48.0;
-                  final travelX =
-                      (constraints.maxWidth - size).clamp(0.0, double.infinity);
-                  final travelY = (constraints.maxHeight - size)
-                      .clamp(0.0, double.infinity);
-                  return Stack(children: [
+        Positioned.fill(
+            child: Theme(
+                data: _notetteTheme(),
+                child: Stack(children: [
+                  if (widget.enabled &&
+                      _expanded &&
+                      !_activating &&
+                      _pinsVisible &&
+                      _canSee &&
+                      !_placing &&
+                      !_opening)
+                    ..._items
+                        .where((item) =>
+                            _status == 'all' || item['status'] == _status)
+                        .where((item) =>
+                            item['clickX'] != null && item['clickY'] != null)
+                        .map((item) {
+                      final media = MediaQuery.sizeOf(context);
+                      final fallbackX = (item['clickX'] as num).toDouble() *
+                          media.width /
+                          ((item['viewportWidth'] as num?)
+                                  ?.toDouble()
+                                  .clamp(1, double.infinity) ??
+                              media.width);
+                      final fallbackY = (item['clickY'] as num).toDouble() *
+                          media.height /
+                          ((item['viewportHeight'] as num?)
+                                  ?.toDouble()
+                                  .clamp(1, double.infinity) ??
+                              media.height);
+                      final anchor = widget.resolvePin?.call(item, media);
+                      final x = anchor?.dx ?? fallbackX;
+                      final y = anchor?.dy ?? fallbackY;
+                      return Positioned(
+                          left:
+                              (x - 15).clamp(0, math.max(0, media.width - 30)),
+                          top:
+                              (y - 15).clamp(0, math.max(0, media.height - 30)),
+                          child: Tooltip(
+                              message: '#${item['number']} ${item['body']}',
+                              child: Material(
+                                color: item['status'] == 'resolved'
+                                    ? const Color(0xff16a34a)
+                                    : _accent,
+                                elevation: 4,
+                                shape: const CircleBorder(
+                                    side: BorderSide(
+                                        color: Colors.white, width: 2)),
+                                child: InkWell(
+                                    customBorder: const CircleBorder(),
+                                    onTap: () => _focus(item['id'] as String),
+                                    child: SizedBox(
+                                        width: 30,
+                                        height: 30,
+                                        child: Center(
+                                            child: Text('${item['number']}',
+                                                style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontWeight: FontWeight.w700,
+                                                    fontSize: 12))))),
+                              )));
+                    }),
+                  if (widget.enabled &&
+                      _expanded &&
+                      !_activating &&
+                      _error != null &&
+                      _dialog == null)
                     Positioned(
-                      left: _launcherPosition.dx * travelX,
-                      top: _launcherPosition.dy * travelY,
-                      width: size,
-                      height: size,
+                        left: 16,
+                        right: 16,
+                        bottom: 84,
+                        child: Material(
+                            color: const Color(0xfffef2f2),
+                            borderRadius: BorderRadius.circular(10),
+                            child: Padding(
+                                padding: const EdgeInsets.all(12),
+                                child: Row(children: [
+                                  Expanded(child: Text(_error!)),
+                                  TextButton(
+                                      onPressed: _reload,
+                                      child: const Text('Retry'))
+                                ])))),
+                  if (_placing) ...[
+                    Positioned.fill(
                       child: GestureDetector(
-                        onPanUpdate: _opening
-                            ? null
-                            : (details) {
-                                setState(() => _launcherPosition = Offset(
-                                      travelX == 0
-                                          ? _launcherPosition.dx
-                                          : (_launcherPosition.dx +
-                                                  details.delta.dx / travelX)
-                                              .clamp(0.0, 1.0),
-                                      travelY == 0
-                                          ? _launcherPosition.dy
-                                          : (_launcherPosition.dy +
-                                                  details.delta.dy / travelY)
-                                              .clamp(0.0, 1.0),
-                                    ));
-                              },
-                        child: Semantics(
-                          hint: 'Drag to move',
-                          child: FloatingActionButton.small(
-                            heroTag: null,
-                            tooltip: 'Send feedback',
-                            onPressed: _opening ? null : _open,
-                            child: const Icon(Icons.feedback_outlined),
-                          ),
-                        ),
+                        key: const ValueKey('notette-pin-placement'),
+                        behavior: HitTestBehavior.opaque,
+                        onTapUp: (details) => _open(details.localPosition),
+                        child: Focus(
+                            autofocus: true,
+                            onKeyEvent: (_, event) {
+                              if (event is KeyDownEvent &&
+                                  event.logicalKey ==
+                                      LogicalKeyboardKey.escape) {
+                                setState(() => _placing = false);
+                                return KeyEventResult.handled;
+                              }
+                              return KeyEventResult.ignored;
+                            },
+                            child: const MouseRegion(
+                              cursor: SystemMouseCursors.precise,
+                              child: SizedBox.expand(),
+                            )),
                       ),
                     ),
-                  ]);
-                }),
-              ),
-            ),
-          ),
-        if (_dialog != null) ...[
-          const ModalBarrier(dismissible: false, color: Colors.black54),
-          FocusScope(autofocus: true, child: _dialog!),
-        ],
+                  ],
+                  if (widget.enabled &&
+                      !_opening &&
+                      (_dialog == null || !_expanded))
+                    Positioned.fill(
+                        key: const ValueKey('notette-floating-actions'),
+                        child: _FloatingActions(
+                          position: _launcherPosition,
+                          onMove: (position) =>
+                              setState(() => _launcherPosition = position),
+                          expanded: _expanded && !_activating,
+                          placing: _placing,
+                          activate: _activating ? null : _activateLauncher,
+                          comment: _placePin,
+                          cancel: () => setState(() => _placing = false),
+                          canSee: _canSee,
+                          pinsVisible: _pinsVisible,
+                          pinCount:
+                              _items.where((i) => i['status'] == 'open').length,
+                          togglePins: _togglePins,
+                          browse: _browse,
+                          account: _account,
+                          viewer: _config?['viewer'],
+                          close: _collapse,
+                        )),
+                  if (_opening) const ModalBarrier(dismissible: false),
+                  if (_dialog != null) ...[
+                    const ModalBarrier(
+                        dismissible: false, color: Colors.transparent),
+                    FocusScope(
+                        autofocus: true,
+                        child: _Reveal(key: _dialog!.key, child: _dialog!)),
+                  ],
+                ]))),
       ]));
 }
 
@@ -210,296 +664,21 @@ class _OverlayHostState extends State<_OverlayHost> {
   Widget build(BuildContext context) => Overlay(initialEntries: [_entry]);
 }
 
-class _FeedbackForm extends StatefulWidget {
-  const _FeedbackForm(
-      {required this.client,
-      required this.page,
-      required this.metadata,
-      required this.png,
-      required this.tokenProvider,
-      required this.onClose});
-  final NotetteClient client;
-  final Map<String, dynamic> page;
-  final Map<String, Object?> metadata;
-  final Uint8List? png;
-  final Future<String> Function(String)? tokenProvider;
-  final VoidCallback onClose;
-  @override
-  State<_FeedbackForm> createState() => _FeedbackFormState();
-}
-
-class _FeedbackFormState extends State<_FeedbackForm> {
-  final _body = TextEditingController();
-  final _name = TextEditingController();
-  final _email = TextEditingController();
-  final _password = TextEditingController();
-  Map<String, dynamic>? _config;
-  String? _error;
-  String? _success;
-  bool _busy = false;
-  bool _attach = false;
-  bool _signIn = false;
-  Completer<String?>? _verification;
-  Widget? _challengeView;
-  bool get _signedIn => _config?['viewer'] != null;
-  bool get _requiresLogin =>
-      _config?['project']['anonymousFeedbackAllowed'] == false && !_signedIn;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
+/// Imperative counterparts to the web widget's open/close/comment/list/focus API.
+class NotetteController {
+  _NotetteFeedbackState? _state;
+  void open() => _state?._expand();
+  void close() => _state?._collapse();
+  void comment() {
+    _state?._expand();
+    _state?._placePin();
   }
 
-  @override
-  void dispose() {
-    final verification = _verification;
-    if (verification != null && !verification.isCompleted)
-      verification.complete(null);
-    for (final controller in [_body, _name, _email, _password]) {
-      controller.dispose();
-    }
-    super.dispose();
+  void list() async {
+    await _state?._expand();
+    _state?._browse();
   }
 
-  Future<void> _run(Future<void> Function() action) async {
-    if (_busy || !mounted) return;
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    try {
-      await action();
-    } catch (e) {
-      if (mounted) setState(() => _error = '$e');
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _load() => _run(() async {
-        final config = await widget.client.config();
-        if (mounted) setState(() => _config = config);
-      });
-
-  Future<void> _refreshConfig() async {
-    final config = await widget.client.config();
-    if (!mounted) throw const NotetteException('Verification cancelled.');
-    if (config['viewer'] == null) widget.client.token = null;
-    setState(() => _config = config);
-  }
-
-  Future<String?> _challenge(String action) async {
-    final key = _config?['turnstileSiteKey'] as String?;
-    if (key == null || key.isEmpty) return null;
-    if (!mounted) throw const NotetteException('Verification cancelled.');
-    final pending = Completer<String?>();
-    _verification = pending;
-    setState(() => _challengeView = TurnstileChallenge(
-          key: UniqueKey(),
-          siteKey: key,
-          origin: widget.client.origin,
-          action: action,
-          provider: widget.tokenProvider,
-          onToken: (token) {
-            if (!pending.isCompleted) pending.complete(token);
-          },
-          onCancel: () {
-            if (!pending.isCompleted) pending.complete(null);
-          },
-        ));
-    try {
-      final token = await pending.future;
-      if (!mounted || token == null)
-        throw const NotetteException(
-            'Verification cancelled. Your draft has been kept.');
-      return token;
-    } finally {
-      _verification = null;
-      if (mounted) setState(() => _challengeView = null);
-    }
-  }
-
-  // Only a definitive Turnstile rejection is safe to automatically replay.
-  // Network failures may have saved feedback already; never replay those.
-  Future<T> _verified<T>(String action, Future<T> Function(String?) send,
-      {bool anonymousOnly = false}) async {
-    for (var attempt = 0;; attempt++) {
-      await _refreshConfig();
-      if (anonymousOnly && _requiresLogin) {
-        throw const NotetteException(
-            'Please sign in to send your feedback. Your draft has been kept.');
-      }
-      final token =
-          anonymousOnly && _signedIn ? null : await _challenge(action);
-      if (!mounted) throw const NotetteException('Verification cancelled.');
-      try {
-        return await send(token);
-      } on NotetteException catch (error) {
-        if (error.code != 'turnstile_failed' || attempt >= 1) rethrow;
-      }
-    }
-  }
-
-  Future<void> _login() => _run(() async {
-        await _verified(
-            'login',
-            (token) => widget.client
-                .login(_email.text, _password.text, turnstileToken: token));
-        if (!mounted) return;
-        _password.clear();
-        final config = await widget.client.config();
-        if (mounted)
-          setState(() {
-            _config = config;
-            _signIn = false;
-          });
-      });
-
-  Future<void> _submit() => _run(() async {
-        if (_body.text.trim().isEmpty)
-          throw const NotetteException('Please enter your feedback.');
-        final result = await _verified(
-            'feedback',
-            (token) => widget.client.createFeedback({
-                  'body': _body.text.trim(),
-                  'page': widget.page,
-                  'author': {
-                    'name': _name.text.trim(),
-                    'email': _email.text.trim()
-                  },
-                  'metadata': {'framework': 'flutter', ...widget.metadata},
-                  if (token != null) 'turnstileToken': token,
-                }),
-            anonymousOnly: true);
-        var message = 'Feedback sent. Thank you!';
-        if (_attach && widget.png != null && result['uploadToken'] != null) {
-          try {
-            await widget.client.uploadScreenshot(result['item']['id'] as String,
-                result['uploadToken'] as String, widget.png!);
-          } catch (_) {
-            message =
-                'Feedback sent, but the screenshot could not be uploaded.';
-          }
-        }
-        if (mounted) setState(() => _success = message);
-      });
-
-  @override
-  Widget build(BuildContext context) {
-    final login = _requiresLogin || _signIn;
-    return AlertDialog(
-      title: Text(_success != null
-          ? 'Thank you'
-          : login
-              ? 'Sign in to Notette'
-              : 'Send feedback'),
-      content: SizedBox(
-          width: 420,
-          child: SingleChildScrollView(
-              child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (_challengeView != null)
-                _challengeView!
-              else if (_success != null)
-                Text(_success!)
-              else if (_config != null) ...[
-                if (login) ...[
-                  TextField(
-                      controller: _email,
-                      enabled: !_busy,
-                      maxLength: 254,
-                      keyboardType: TextInputType.emailAddress,
-                      decoration: const InputDecoration(labelText: 'Email')),
-                  TextField(
-                      controller: _password,
-                      enabled: !_busy,
-                      obscureText: true,
-                      decoration: const InputDecoration(labelText: 'Password')),
-                ] else ...[
-                  TextField(
-                      controller: _body,
-                      enabled: !_busy,
-                      minLines: 3,
-                      maxLines: 6,
-                      maxLength: 5000,
-                      decoration: const InputDecoration(
-                          labelText: 'What could be better?')),
-                  if (!_signedIn) ...[
-                    TextField(
-                        controller: _name,
-                        enabled: !_busy,
-                        maxLength: 120,
-                        decoration: const InputDecoration(
-                            labelText: 'Name (optional)')),
-                    TextField(
-                        controller: _email,
-                        enabled: !_busy,
-                        maxLength: 254,
-                        keyboardType: TextInputType.emailAddress,
-                        decoration: const InputDecoration(
-                            labelText: 'Email (optional)')),
-                    TextButton(
-                        onPressed:
-                            _busy ? null : () => setState(() => _signIn = true),
-                        child: const Text('Sign in')),
-                  ] else
-                    TextButton(
-                        onPressed: _busy
-                            ? null
-                            : () => _run(() async {
-                                  await widget.client.logout();
-                                  final config = await widget.client.config();
-                                  if (mounted) setState(() => _config = config);
-                                }),
-                        child: const Text('Sign out')),
-                  if (widget.png != null &&
-                      _config!['project']['screenshotsEnabled'] == true) ...[
-                    CheckboxListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Include screenshot'),
-                        value: _attach,
-                        onChanged:
-                            _busy ? null : (v) => setState(() => _attach = v!)),
-                    if (_attach)
-                      Image.memory(widget.png!,
-                          height: 140, fit: BoxFit.contain),
-                  ],
-                ],
-              ],
-              if (_busy && _challengeView == null)
-                const LinearProgressIndicator(),
-              if (_error != null)
-                Text(_error!,
-                    style:
-                        TextStyle(color: Theme.of(context).colorScheme.error)),
-            ],
-          ))),
-      actions: [
-        TextButton(
-            onPressed: _busy ? null : widget.onClose,
-            child: const Text('Close')),
-        if (_signIn && !_requiresLogin && _success == null)
-          TextButton(
-              onPressed: _busy ? null : () => setState(() => _signIn = false),
-              child: const Text('Back')),
-        if (_success == null)
-          TextButton(
-              onPressed: _busy
-                  ? null
-                  : _config == null
-                      ? _load
-                      : login
-                          ? _login
-                          : _submit,
-              child: Text(_config == null
-                  ? 'Retry'
-                  : login
-                      ? 'Sign in'
-                      : 'Send')),
-      ],
-    );
-  }
+  void focus(String id) => _state?._focus(id);
+  void refresh() => _state?._reload();
 }

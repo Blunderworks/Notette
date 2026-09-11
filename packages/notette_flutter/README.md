@@ -1,6 +1,6 @@
 # Notette for Flutter
 
-A native Material feedback overlay that sends feedback to your existing self-hosted Notette dashboard. Wrap your app once to show a floating feedback button across routes. Includes optional screenshot previews, reviewer sign-in/sign-out, screen context and custom metadata.
+A native Material feedback overlay that sends feedback to your existing self-hosted Notette dashboard. Wrap your app once to show a floating feedback button across routes. Includes the web widget's compact indigo toolbar and cards, feedback pins, searchable lists, threads, moderation, mentions and account flows.
 
 Drag the feedback button with a finger or mouse to move it out of the way; tap or click to open the form. Its position is retained while the overlay is mounted, including across routes and opening/closing the form. It stays within the safe area and adjusts to window resizing, rotation and the keyboard. The position resets when the overlay is recreated or the app restarts.
 
@@ -62,7 +62,7 @@ MaterialApp(
     screenTitle: () => 'Home',
     metadata: const {'appVersion': '1.0.0', 'environment': 'preview'},
     enabled: true, // Set false to hide the launcher in selected builds.
-    screenshots: true, // Enables an unchecked, optional attachment checkbox.
+    screenshots: true, // Default; users can uncheck Include screenshot.
     child: child!,
   ),
   home: const Scaffold(body: Center(child: Text('Your app'))),
@@ -71,13 +71,13 @@ MaterialApp(
 
 See [example/lib/main.dart](example/lib/main.dart) for a complete example with lifecycle management. To run it, copy that file into a `flutter create` app, add the dependency above, and replace the server/key/origin.
 
-For multiple screens, connect `screenPath` to your router's current path or to state maintained by a `NavigatorObserver`. The callback is evaluated when feedback opens. Return a root-relative path such as `/settings/profile`; it becomes `https://mobile.example.com/settings/profile` in the dashboard. Native links are logical screen identifiers, not automatically configured deep links. Do not put private data in route query parameters. Viewport dimensions use Flutter logical pixels; the snapshot uses one image pixel per logical pixel. No DOM selector, element pin or scroll offset is inferred for native widgets.
+For multiple screens, connect `screenPath` to your router's current path or to state maintained by a `NavigatorObserver`. Tap the circular feedback button to sign in (or expand the toolbar if already signed in), choose **Comment**, then tap the screen to place a pin and open the form. Cancel exits pin placement. The callback is evaluated when the pin is placed. Return a root-relative path such as `/settings/profile`; it becomes `https://mobile.example.com/settings/profile` in the dashboard. Native links are logical screen identifiers, not automatically configured deep links. Do not put private data in route query parameters. Viewport dimensions use Flutter logical pixels; the snapshot uses one image pixel per logical pixel. The selected pin is sent as screen coordinates; no DOM selector or scroll offset is inferred for native widgets.
 
 `metadata` must be JSON-encodable and fit the server's 8,000-character limit, with keys of at most 64 characters. Feedback is limited to 5,000 characters. Optional name/email describe anonymous feedback; signed-in authors use their server account identity.
 
 ## Screenshots and platform setup
 
-- Screenshots default to off. When enabled, opening the form captures the app subtree into memory before the dialog appears. Nothing is uploaded unless the user selects **Include screenshot** and sends feedback; a preview is shown first. Only use capture on screens appropriate to share. The project must also enable screenshots.
+- Screenshots default to on. Placing a pin captures the app subtree with a pin marker before the form appears. **Include screenshot** starts checked; changes are remembered on the device across forms and app restarts (for the current overlay only if storage is unavailable). A preview is shown, and the image is uploaded only when checked and feedback is sent. Set `screenshots: false` to disable capture. The project must also enable screenshots.
 - Flutter platform views, WebViews, video textures and some web renderers may not appear in the image. Capture failures leave text feedback available. Server upload limits still apply. If upload fails after feedback is saved, the UI says so and prevents resubmitting the saved feedback.
 - Android: ensure `android/app/src/main/AndroidManifest.xml` includes `<uses-permission android:name="android.permission.INTERNET" />` outside `<application>` for release builds.
 - macOS sandboxed builds: add `<key>com.apple.security.network.client</key><true/>` to both DebugProfile and Release entitlements.
@@ -86,9 +86,9 @@ For multiple screens, connect `screenPath` to your router's current path or to s
 
 ## Authentication and Turnstile
 
-The overlay supports inline sign-in for existing Notette accounts, without saving their password. Sign out revokes the session on the server. Account creation and email confirmation take place outside this package; create/invite members using Notette's dashboard or existing web sign-up flow.
+Use inline sign-in, create an account when the project allows open signups, or choose **Approve there** to authorize from an existing dashboard session in your browser. Signup can ask you to confirm your email; the widget supports resending the confirmation and returning to sign-in. Passwords are never stored. Sessions are scoped to the server, project and origin and remembered using `flutter_secure_storage`; set `persistSession: false` on `NotetteClient` to keep sessions in memory only. Storage failures fall back to memory. Sign out clears the local session and requests revocation on the server.
 
-When the project has Turnstile configured, `NotetteFeedback` automatically presents a challenge for anonymous feedback and password sign-in. Consuming apps only configure `NotetteClient` and wrap their app in `NotetteFeedback`; no challenge code, site key, or secret is needed in the app. The server supplies the public site key. Native challenges use the client's `appOrigin`; web challenges use the browser origin. Add that hostname to the Turnstile widget in Cloudflare and allow the origin in Notette.
+When the project has Turnstile configured, `NotetteFeedback` automatically presents a challenge for anonymous feedback/replies, password sign-in and signup. Consuming apps only configure `NotetteClient` and wrap their app in `NotetteFeedback`; no challenge code, site key, or secret is needed in the app. The server supplies the public site key. Native challenges use the client's `appOrigin`; web challenges use the browser origin. Add that hostname to the Turnstile widget in Cloudflare and allow the origin in Notette.
 
 If verification fails, expires or takes too long, choose **Retry verification** or **Cancel verification**. Your draft is kept. Notette may ask you to verify again before sending. If a connection error leaves you unsure whether feedback was sent, check the dashboard before retrying.
 
@@ -96,8 +96,26 @@ If verification fails, expires or takes too long, choose **Retry verification** 
 
 Built-in presentation supports Android, iOS, macOS, Windows and web. Linux has no bundled WebView implementation; protected actions show an explanatory error unless the optional provider is supplied. Windows needs WebView2 and the WebView plugin's build prerequisites; Apple targets require iOS 12+ / macOS 10.14+. See [native WebView setup](https://inappwebview.dev/docs/intro/) for build requirements. Flutter web loads Cloudflare's script automatically; permit `https://challenges.cloudflare.com` in CSP `script-src` and `frame-src`. No manual script injection or web bridge setup is required.
 
-Apps integrating a separate Notette approval flow can set `client.token` to a per-user **widget** session issued for this exact project and origin. Your application's own login token cannot be used. Never ship a shared admin token. Signed-in submissions skip Turnstile, as with the existing web widget. Configuration is refreshed before each action, including expired-session and sign-in requirement changes.
+Apps supplying their own Notette session can set `client.token` to a per-user **widget** session issued for this exact project and origin. Your application's own login token cannot be used. Never ship a shared admin token. Signed-in submissions skip Turnstile, as with the existing web widget. Configuration is refreshed before each action, including expired-session and sign-in requirement changes.
 
 ## Available features
 
-The Flutter widget collects feedback. Thread browsing, replies, element picking, admin triage, mentions and sign-up are available in the web widget and dashboard.
+- **Toolbar:** Comment, show/hide numbered pins, list, account and collapse. The collapsed circular launcher uses the same comment icon as the web widget and remains draggable. A signed-out tap opens sign-in, including on public projects. `position: Alignment.bottomLeft` changes the default corner; `initiallyOpen: true` starts expanded.
+- **Browse:** current-screen feedback, shared Open/Resolved/All filters, search and refresh. Admins can browse all pages. Pin visibility and status filters are remembered per server/project/origin.
+- **Threads:** author roles, relative timestamps, highlighted mentions, replies, authenticated screenshot previews with zoom, copy-for-agent Markdown, and admin dashboard links. Admins can resolve/reopen and delete with confirmation. Visibility and reply permissions follow the project settings; signed-in members do not gain admin privileges.
+- **Compose and reply:** tinted fields with labels above them, remembered anonymous identity, `@` mention suggestions for signed-in users, screenshot opt-out, Ctrl/Cmd+Enter to send, Escape to close. `user: {'name': '...', 'email': '...'}` pre-fills anonymous identity without authenticating it. `deployment` supplies environment/branch/commit/URL context alongside `metadata`.
+- **Account:** signup, email verification/resend, dashboard approval with cancel/denied/expired states, sign-out, and project email notification preferences when email is configured.
+
+The sign-in card follows the web layout and uses tinted placeholder fields; placeholders disappear while typing, so labels never overlap input. Short entrance, hover, press, focus and resize animations respect reduced-motion preferences.
+
+### Native routing and targeting
+
+Route changes refresh page pins automatically. Supply `onNavigate: (path) async { ... }` to connect **Go to screen** to your router. `initialFeedbackId` opens a specific thread (waiting for required sign-in); Flutter web also accepts the `notette` URL query parameter. `openUrl` can override the system browser for approval and dashboard links.
+
+Native pins use logical screen coordinates scaled to the current viewport. Flutter does not expose web DOM selectors, XPath, or automatic element/scroll anchoring. For changing native layouts, `resolvePin: (item, viewport) => ...` can return an application's current anchor position for an item; returning null uses the coordinate fallback. Pin capture records the screen, not private input values or a synthesized DOM tree.
+
+Use an optional `NotetteController` for `open()`, `close()`, `comment()`, `list()`, `focus(id)` and `refresh()`. Pass it as `controller` to `NotetteFeedback`. Remove the widget or set `enabled: false` to hide it. Screen navigation belongs to the host router; opening a thread does not silently change screens.
+
+### Remembered sessions
+
+Follow [flutter_secure_storage platform setup](https://pub.dev/packages/flutter_secure_storage/versions/9.2.4) for your target, including Apple Keychain entitlements and Linux libsecret dependencies. Web persistence requires HTTPS (or localhost). The current secure-storage dependency supports standard JavaScript web builds, not Flutter WebAssembly builds. If your app already owns session persistence, set `persistSession: false`, supply `client.token`, and manage its lifetime yourself.
