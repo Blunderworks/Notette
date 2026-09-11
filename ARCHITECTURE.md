@@ -90,6 +90,7 @@ Base: `packages/notette_flutter/lib/src/`.
 
 Base: `src/routes/(app)/`; shared UI: `src/lib/components/`, `src/app.css`.
 - Layout gates members to `/` and `/settings/account`; admins get project navigation. Serialize dates/DTOs explicitly.
+- Project `settings/+page.svelte` card order: Embed, Members, Project settings, Your notifications, Bot protection, Danger zone.
 - `src/lib/confirm.svelte.ts::confirmSubmit`: synchronously cancel enhance submission, await branded modal, resubmit. Do not use async cancellation or onsubmit preventDefault; enhance can still submit. Native confirm prohibited.
 - `src/lib/server/feedback-bulk.ts::bulkFeedbackAction`: shared list actions; project page must restrict IDs to its project. Confirm deletes, clear selection after success.
 - Project `/try` embeds real widget; instance origin must be allowed. Login named actions: login/resend.

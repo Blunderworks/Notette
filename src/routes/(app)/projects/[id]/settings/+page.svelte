@@ -40,28 +40,6 @@
 </svelte:head>
 
 <div class="stack">
-	<div class="card">
-		<div class="card-header"><h2>Bot protection</h2></div>
-		<form method="POST" action="?/turnstile" class="card-body stack" use:enhance>
-			<p class="help">Turnstile is {data.turnstileConfigured ? 'enabled' : 'disabled'} for this project. Protects anonymous feedback and replies, and widget sign-in and sign-up.</p>
-			{#if form?.action === 'turnstile'}
-				{#if form.errors}<div class="form-error">{form.errors.join(' ')}</div>{/if}
-				{#if form.success}<div class="form-success">Bot protection settings saved.</div>{/if}
-			{/if}
-			<div class="field">
-				<label class="label" for="siteKey">Turnstile site key</label>
-				<input class="input" id="siteKey" name="siteKey" value={project.turnstileSiteKey ?? ''} maxlength="256" autocomplete="off" />
-			</div>
-			<div class="field">
-				<label class="label" for="secretKey">Turnstile secret key</label>
-				<input class="input" id="secretKey" name="secretKey" type="password" maxlength="256" autocomplete="new-password" />
-				<p class="help">{data.turnstileConfigured ? 'A secret is saved. Leave blank to keep it, or enter a replacement.' : 'Enter the secret key from Cloudflare.'}</p>
-			</div>
-			<p class="help">Add each embedding site's hostname in Cloudflare → Turnstile → Hostnames, including localhost when testing. Host sites must allow https://challenges.cloudflare.com in their CSP script-src and frame-src.</p>
-			<label class="row"><input type="checkbox" name="remove" /> Disable Turnstile and remove both keys</label>
-			<button class="btn btn-primary" type="submit">Save bot protection</button>
-		</form>
-	</div>
 	{#if data.created}
 		<div class="form-success">Project created. Add the embed snippet below to your site to start collecting feedback.</div>
 	{/if}
@@ -116,92 +94,6 @@
 			{/if}
 		</div>
 	</div>
-
-	<form method="POST" action="?/update" class="card" use:enhance>
-		<div class="card-header">
-			<h2>Project settings</h2>
-		</div>
-		<div class="card-body stack">
-			{#if form?.action === 'update' && form.errors?.length}
-				<div class="form-error">{#each form.errors as error}<div>{error}</div>{/each}</div>
-			{:else if form?.action === 'update' && form.success}
-				<div class="form-success">Settings saved.</div>
-			{/if}
-			<div class="field">
-				<label class="label" for="name">Project name</label>
-				<input class="input" id="name" name="name" required maxlength="100" value={values.name} />
-			</div>
-			<div class="field">
-				<label class="label" for="allowedOrigins">Allowed origins</label>
-				<textarea class="textarea mono" id="allowedOrigins" name="allowedOrigins" placeholder={'https://app.example.com\nhttps://*.vercel.app\nhttp://localhost:3000'}>{values.originsText}</textarea>
-				<span class="help">
-					One origin per line. Wildcards such as <code class="inline">https://*.vercel.app</code> or
-					<code class="inline">http://localhost:*</code> are supported. A lone <code class="inline">*</code> allows any origin.
-					{#if data.turnstileConfigured}
-						Bot protection is on: every hostname listed here must also be added to your Turnstile widget's hostnames in
-						the Cloudflare dashboard, or the challenge fails with error 110200.
-					{/if}
-				</span>
-			</div>
-			<label class="checkbox">
-				<input type="checkbox" name="publicFeedbackVisible" checked={values.publicFeedbackVisible} />
-				<span>
-					<strong>Reviewers can see existing feedback</strong>
-					<span class="help" style="display: block">Show pins, threads and screenshots to anyone on the site, not only signed-in admins.</span>
-				</span>
-			</label>
-			<label class="checkbox">
-				<input type="checkbox" name="reviewerRepliesEnabled" checked={values.reviewerRepliesEnabled} />
-				<span><strong>Reviewers can reply to threads</strong></span>
-			</label>
-			<label class="checkbox">
-				<input type="checkbox" name="screenshotsEnabled" checked={values.screenshotsEnabled} />
-				<span>
-					<strong>Capture screenshots</strong>
-					<span class="help" style="display: block">Attach a viewport screenshot to each feedback item. Submission still succeeds if capture fails.</span>
-				</span>
-			</label>
-			<label class="checkbox">
-				<input type="checkbox" name="anonymousFeedbackAllowed" checked={values.anonymousFeedbackAllowed} />
-				<span>
-					<strong>Allow anonymous feedback</strong>
-					<span class="help" style="display: block">
-						Anyone on the site can use the widget without an account. When off, visitors must sign in (or sign up,
-						if enabled below) before the widget opens.
-					</span>
-				</span>
-			</label>
-			<label class="checkbox">
-				<input type="checkbox" name="openSignups" checked={values.openSignups} />
-				<span>
-					<strong>Open for signups</strong>
-					<span class="help" style="display: block">
-						Visitors can create an account from the widget, and any signed-in account joins this project on first
-						use. When off, only members added below (plus owners and admins) can sign in on this project.
-					</span>
-				</span>
-			</label>
-			<label class="checkbox">
-				<input type="checkbox" name="emailVerificationRequired" checked={values.emailVerificationRequired} disabled={!data.emailConfigured} />
-				<span>
-					<strong>Require email verification for signups</strong>
-					<span class="help" style="display: block">
-						{#if data.emailConfigured}
-							Accounts created from the widget must confirm their email address through a link before they can sign in.
-						{:else}
-							Needs outgoing email: set <code class="inline">SMTP_HOST</code> and <code class="inline">EMAIL_FROM</code> on the server to enable this.
-						{/if}
-					</span>
-				</span>
-			</label>
-			{#if !data.emailConfigured && values.emailVerificationRequired}
-				<input type="hidden" name="emailVerificationRequired" value="on" />
-			{/if}
-		</div>
-		<div class="card-footer form-actions">
-			<button class="btn btn-primary" type="submit">Save settings</button>
-		</div>
-	</form>
 
 	<div class="card">
 		<div class="card-header">
@@ -274,6 +166,92 @@
 		</div>
 	</div>
 
+	<form method="POST" action="?/update" class="card" use:enhance>
+		<div class="card-header">
+			<h2>Project settings</h2>
+		</div>
+		<div class="card-body stack">
+			{#if form?.action === 'update' && form.errors?.length}
+				<div class="form-error">{#each form.errors as error}<div>{error}</div>{/each}</div>
+			{:else if form?.action === 'update' && form.success}
+				<div class="form-success">Settings saved.</div>
+			{/if}
+			<div class="field">
+				<label class="label" for="name">Project name</label>
+				<input class="input" id="name" name="name" required maxlength="100" value={values.name} />
+			</div>
+			<div class="field">
+				<label class="label" for="allowedOrigins">Allowed origins</label>
+				<textarea class="textarea mono" id="allowedOrigins" name="allowedOrigins" placeholder={'https://app.example.com\nhttps://*.vercel.app\nhttp://localhost:3000'}>{values.originsText}</textarea>
+				<span class="help">
+					One origin per line. Wildcards such as <code class="inline">https://*.vercel.app</code> or
+					<code class="inline">http://localhost:*</code> are supported. A lone <code class="inline">*</code> allows any origin.
+					{#if data.turnstileConfigured}
+						Bot protection is on: every hostname listed here must also be added to your Turnstile widget's hostnames in
+						the Cloudflare dashboard, or the challenge fails with error 110200.
+					{/if}
+				</span>
+			</div>
+			<label class="checkbox">
+				<input type="checkbox" name="publicFeedbackVisible" checked={values.publicFeedbackVisible} />
+				<span>
+					<strong>Reviewers can see existing feedback</strong>
+					<span class="help" style="display: block">Show pins, threads and screenshots to anyone on the site, not only signed-in admins.</span>
+				</span>
+			</label>
+			<label class="checkbox">
+				<input type="checkbox" name="reviewerRepliesEnabled" checked={values.reviewerRepliesEnabled} />
+				<span><strong>Reviewers can reply to threads</strong></span>
+			</label>
+			<label class="checkbox">
+				<input type="checkbox" name="screenshotsEnabled" checked={values.screenshotsEnabled} />
+				<span>
+					<strong>Capture screenshots</strong>
+					<span class="help" style="display: block">Attach a viewport screenshot to each feedback item. Submission still succeeds if capture fails.</span>
+				</span>
+			</label>
+			<label class="checkbox">
+				<input type="checkbox" name="anonymousFeedbackAllowed" checked={values.anonymousFeedbackAllowed} />
+				<span>
+					<strong>Allow anonymous feedback</strong>
+					<span class="help" style="display: block">
+						Anyone on the site can use the widget without an account. When off, visitors must sign in (or sign up,
+						if enabled below) before the widget opens.
+					</span>
+				</span>
+			</label>
+			<label class="checkbox">
+				<input type="checkbox" name="openSignups" checked={values.openSignups} />
+				<span>
+					<strong>Open for signups</strong>
+					<span class="help" style="display: block">
+						Visitors can create an account from the widget, and any signed-in account joins this project on first
+						use. When off, only members added above (plus owners and admins) can sign in on this project.
+					</span>
+				</span>
+			</label>
+			<label class="checkbox">
+				<input type="checkbox" name="emailVerificationRequired" checked={values.emailVerificationRequired} disabled={!data.emailConfigured} />
+				<span>
+					<strong>Require email verification for signups</strong>
+					<span class="help" style="display: block">
+						{#if data.emailConfigured}
+							Accounts created from the widget must confirm their email address through a link before they can sign in.
+						{:else}
+							Needs outgoing email: set <code class="inline">SMTP_HOST</code> and <code class="inline">EMAIL_FROM</code> on the server to enable this.
+						{/if}
+					</span>
+				</span>
+			</label>
+			{#if !data.emailConfigured && values.emailVerificationRequired}
+				<input type="hidden" name="emailVerificationRequired" value="on" />
+			{/if}
+		</div>
+		<div class="card-footer form-actions">
+			<button class="btn btn-primary" type="submit">Save settings</button>
+		</div>
+	</form>
+
 	<form method="POST" action="?/notifications" class="card" use:enhance>
 		<div class="card-header">
 			<h2>Your notifications</h2>
@@ -306,6 +284,29 @@
 			</div>
 		{/if}
 	</form>
+
+	<div class="card">
+		<div class="card-header"><h2>Bot protection</h2></div>
+		<form method="POST" action="?/turnstile" class="card-body stack" use:enhance>
+			<p class="help">Turnstile is {data.turnstileConfigured ? 'enabled' : 'disabled'} for this project. Protects anonymous feedback and replies, and widget sign-in and sign-up.</p>
+			{#if form?.action === 'turnstile'}
+				{#if form.errors}<div class="form-error">{form.errors.join(' ')}</div>{/if}
+				{#if form.success}<div class="form-success">Bot protection settings saved.</div>{/if}
+			{/if}
+			<div class="field">
+				<label class="label" for="siteKey">Turnstile site key</label>
+				<input class="input" id="siteKey" name="siteKey" value={project.turnstileSiteKey ?? ''} maxlength="256" autocomplete="off" />
+			</div>
+			<div class="field">
+				<label class="label" for="secretKey">Turnstile secret key</label>
+				<input class="input" id="secretKey" name="secretKey" type="password" maxlength="256" autocomplete="new-password" />
+				<p class="help">{data.turnstileConfigured ? 'A secret is saved. Leave blank to keep it, or enter a replacement.' : 'Enter the secret key from Cloudflare.'}</p>
+			</div>
+			<p class="help">Add each embedding site's hostname in Cloudflare → Turnstile → Hostnames, including localhost when testing. Host sites must allow https://challenges.cloudflare.com in their CSP script-src and frame-src.</p>
+			<label class="row"><input type="checkbox" name="remove" /> Disable Turnstile and remove both keys</label>
+			<button class="btn btn-primary" type="submit">Save bot protection</button>
+		</form>
+	</div>
 
 	<div class="card danger">
 		<div class="card-header">
