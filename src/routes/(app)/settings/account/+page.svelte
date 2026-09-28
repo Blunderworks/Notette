@@ -38,10 +38,6 @@
 			{#if form?.action === 'password' && form.error}<div class="form-error">{form.error}</div>{/if}
 			{#if form?.action === 'password' && form.success}<div class="form-success">Password changed. Other sessions were signed out.</div>{/if}
 			<div class="field">
-				<label class="label" for="current">Current password</label>
-				<input class="input" id="current" name="current" type="password" autocomplete="current-password" required />
-			</div>
-			<div class="field">
 				<label class="label" for="password">New password</label>
 				<input class="input" id="password" name="password" type="password" autocomplete="new-password" minlength="10" required />
 			</div>

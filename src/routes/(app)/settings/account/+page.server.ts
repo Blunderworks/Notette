@@ -1,6 +1,5 @@
 import { fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
-import { verifyPassword } from '$lib/server/auth/password';
 import { deleteUserSession, invalidateUserSessions, listUserSessions } from '$lib/server/auth/sessions';
 import { setUserPassword, updateUserProfile } from '$lib/server/services/users';
 import { passwordSchema } from '$lib/server/validation';
@@ -47,13 +46,9 @@ export const actions: Actions = {
 	},
 	password: async ({ request, locals }) => {
 		const form = await request.formData();
-		const current = String(form.get('current') ?? '');
 		const next = String(form.get('password') ?? '');
 		const confirm = String(form.get('confirm') ?? '');
 		const user = locals.user!;
-		if (!(await verifyPassword(current, user.passwordHash))) {
-			return fail(400, { action: 'password', error: 'Current password is incorrect.' });
-		}
 		const parsed = passwordSchema.safeParse(next);
 		if (!parsed.success) return fail(400, { action: 'password', error: parsed.error.issues[0]?.message ?? 'Invalid password.' });
 		if (next !== confirm) return fail(400, { action: 'password', error: 'Passwords do not match.' });
