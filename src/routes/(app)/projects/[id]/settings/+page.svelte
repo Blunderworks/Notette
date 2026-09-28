@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import type { SubmitFunction } from '@sveltejs/kit';
 	import { confirmSubmit } from '$lib/confirm.svelte';
 	import CopyButton from '$lib/components/CopyButton.svelte';
 	import { basicEmbedSnippet, deploymentEmbedSnippet, programmaticEmbedSnippet } from '$lib/embed';
@@ -33,6 +34,16 @@
 	const withDeployment = $derived(deploymentEmbedSnippet(data.baseUrl, project.clientKey));
 	const programmatic = $derived(programmaticEmbedSnippet(data.baseUrl, project.clientKey));
 	let showAdvanced = $state(false);
+
+	// The default enhance resets the form after success, which blanks inputs whose saved values did not change.
+	const keepValues: SubmitFunction = () => async ({ update }) => update({ reset: false });
+	const keepTurnstileValues: SubmitFunction = ({ formElement }) => async ({ result, update }) => {
+		await update({ reset: false });
+		if (result.type === 'success') {
+			(formElement.elements.namedItem('secretKey') as HTMLInputElement).value = '';
+			(formElement.elements.namedItem('remove') as HTMLInputElement).checked = false;
+		}
+	};
 </script>
 
 <svelte:head>
@@ -166,7 +177,7 @@
 		</div>
 	</div>
 
-	<form method="POST" action="?/update" class="card" use:enhance>
+	<form method="POST" action="?/update" class="card" use:enhance={keepValues}>
 		<div class="card-header">
 			<h2>Project settings</h2>
 		</div>
@@ -252,7 +263,7 @@
 		</div>
 	</form>
 
-	<form method="POST" action="?/notifications" class="card" use:enhance>
+	<form method="POST" action="?/notifications" class="card" use:enhance={keepValues}>
 		<div class="card-header">
 			<h2>Your notifications</h2>
 		</div>
@@ -287,7 +298,7 @@
 
 	<div class="card">
 		<div class="card-header"><h2>Bot protection</h2></div>
-		<form method="POST" action="?/turnstile" class="card-body stack" use:enhance>
+		<form method="POST" action="?/turnstile" class="card-body stack" use:enhance={keepTurnstileValues}>
 			<p class="help">Turnstile is {data.turnstileConfigured ? 'enabled' : 'disabled'} for this project. Protects anonymous feedback and replies, and widget sign-in and sign-up.</p>
 			{#if form?.action === 'turnstile'}
 				{#if form.errors}<div class="form-error">{form.errors.join(' ')}</div>{/if}
