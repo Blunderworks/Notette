@@ -75,20 +75,52 @@ export async function setUserPassword(id: string, password: string): Promise<voi
 	await db.update(users).set({ passwordHash, updatedAt: new Date() }).where(eq(users.id, id));
 }
 
-export async function deleteUser(id: string): Promise<boolean> {
-	const deleted = await db.delete(users).where(eq(users.id, id)).returning({ id: users.id });
-	return deleted.length > 0;
-}
-
 /** Viewer identity returned to the widget after sign-in or on config load. */
 export function toViewerDto(user: User): WidgetViewerDto {
 	return { admin: isAdminRole(user.role), role: user.role, name: user.name, email: user.email, emailNotifications: true };
 }
 
-export async function countOwners(): Promise<number> {
-	const [row] = await db
-		.select({ count: sql<number>`count(*)::int` })
-		.from(users)
-		.where(eq(users.role, 'owner'));
-	return row?.count ?? 0;
+
+/** Advisory lock serializing changes to who owns the instance (first setup, demotions, deletions). */
+const OWNER_LOCK = 0x4e6f7465;
+
+/**
+ * Creates the first account as owner. Returns null when any account already
+ * exists; concurrent setup submissions cannot both succeed.
+ */
+export async function createFirstOwner(input: { email: string; name: string; password: string }): Promise<User | null> {
+	const passwordHash = await hashPassword(input.password);
+	return db.transaction(async (tx) => {
+		await tx.execute(sql`select pg_advisory_xact_lock(${OWNER_LOCK})`);
+		const [existing] = await tx.select({ count: sql<number>`count(*)::int` }).from(users);
+		if ((existing?.count ?? 0) > 0) return null;
+		const [row] = await tx
+			.insert(users)
+			.values({ email: input.email.trim().toLowerCase(), name: input.name.trim(), passwordHash, role: 'owner' })
+			.returning();
+		return row;
+	});
+}
+
+/**
+ * Changes a user's role or deletes them unless that would leave no owner.
+ * Serialized with other owner changes so two owners cannot demote or delete
+ * each other at the same moment.
+ */
+export async function changeUserKeepingOwner(
+	id: string,
+	change: { role: UserRole } | { delete: true }
+): Promise<'ok' | 'not_found' | 'last_owner'> {
+	return db.transaction(async (tx) => {
+		await tx.execute(sql`select pg_advisory_xact_lock(${OWNER_LOCK})`);
+		const [target] = await tx.select().from(users).where(eq(users.id, id)).limit(1);
+		if (!target) return 'not_found';
+		if (target.role === 'owner' && ('delete' in change || change.role !== 'owner')) {
+			const [owners] = await tx.select({ count: sql<number>`count(*)::int` }).from(users).where(eq(users.role, 'owner'));
+			if ((owners?.count ?? 0) <= 1) return 'last_owner';
+		}
+		if ('delete' in change) await tx.delete(users).where(eq(users.id, id));
+		else await tx.update(users).set({ role: change.role, updatedAt: new Date() }).where(eq(users.id, id));
+		return 'ok';
+	});
 }

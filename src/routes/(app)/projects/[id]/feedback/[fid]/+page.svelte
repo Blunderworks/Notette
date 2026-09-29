@@ -5,7 +5,7 @@
 	import MentionText from '$lib/components/MentionText.svelte';
 	import MentionTextarea from '$lib/components/MentionTextarea.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
-	import { formatDateTime, siteLinkForFeedback, timeAgo } from '$lib/format';
+	import { formatDateTime, isHttpUrl, siteLinkForFeedback, timeAgo } from '$lib/format';
 	import { formatFeedbackForAgent } from '$lib/shared/agent-format';
 	import type { MentionRef } from '$lib/shared/types';
 
@@ -199,7 +199,7 @@
 							{#each deploymentEntries as [key, value]}
 								<dt>{key}</dt>
 								<dd class="break">
-									{#if key === 'url' && value}<a href={value} target="_blank" rel="noopener">{value}</a>{:else}{value}{/if}
+									{#if key === 'url' && isHttpUrl(value)}<a href={value} target="_blank" rel="noopener">{value}</a>{:else}{value}{/if}
 								</dd>
 							{/each}
 						</dl>

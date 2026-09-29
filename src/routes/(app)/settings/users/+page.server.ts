@@ -1,14 +1,7 @@
 import { fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
-import {
-	countOwners,
-	createUser,
-	deleteUser,
-	getUserById,
-	listUsers,
-	markEmailVerified,
-	updateUserProfile
-} from '$lib/server/services/users';
+import { isUuid } from '$lib/server/ids';
+import { changeUserKeepingOwner, createUser, getUserById, listUsers, markEmailVerified } from '$lib/server/services/users';
 import { emailSchema, passwordSchema } from '$lib/server/validation';
 import { ApiError } from '$lib/server/http';
 import { isUserRole, type UserRole } from '$lib/shared/roles';
@@ -72,12 +65,10 @@ export const actions: Actions = {
 		const form = await request.formData();
 		const id = String(form.get('userId') ?? '');
 		const role = parseRole(form.get('role'));
-		const target = await getUserById(id);
-		if (!target) return fail(404, { action: 'setRole', error: 'User not found.' });
-		if (target.role === 'owner' && role !== 'owner' && (await countOwners()) <= 1) {
-			return fail(400, { action: 'setRole', error: 'At least one owner is required.' });
-		}
-		await updateUserProfile(id, { role });
+		if (!isUuid(id)) return fail(404, { action: 'setRole', error: 'User not found.' });
+		const result = await changeUserKeepingOwner(id, { role });
+		if (result === 'not_found') return fail(404, { action: 'setRole', error: 'User not found.' });
+		if (result === 'last_owner') return fail(400, { action: 'setRole', error: 'At least one owner is required.' });
 		return { action: 'setRole', success: true };
 	},
 	/** Lets an owner activate a widget sign-up whose confirmation email never arrived. */
@@ -86,7 +77,7 @@ export const actions: Actions = {
 		if (denied) return denied;
 		const form = await request.formData();
 		const id = String(form.get('userId') ?? '');
-		const target = await getUserById(id);
+		const target = isUuid(id) ? await getUserById(id) : null;
 		if (!target) return fail(404, { action: 'verify', error: 'User not found.' });
 		await markEmailVerified(id);
 		return { action: 'verify', success: true };
@@ -97,12 +88,10 @@ export const actions: Actions = {
 		const form = await request.formData();
 		const id = String(form.get('userId') ?? '');
 		if (id === locals.user!.id) return fail(400, { action: 'delete', error: 'You cannot delete your own account.' });
-		const target = await getUserById(id);
-		if (!target) return fail(404, { action: 'delete', error: 'User not found.' });
-		if (target.role === 'owner' && (await countOwners()) <= 1) {
-			return fail(400, { action: 'delete', error: 'At least one owner is required.' });
-		}
-		await deleteUser(id);
+		if (!isUuid(id)) return fail(404, { action: 'delete', error: 'User not found.' });
+		const result = await changeUserKeepingOwner(id, { delete: true });
+		if (result === 'not_found') return fail(404, { action: 'delete', error: 'User not found.' });
+		if (result === 'last_owner') return fail(400, { action: 'delete', error: 'At least one owner is required.' });
 		return { action: 'delete', success: true };
 	}
 };

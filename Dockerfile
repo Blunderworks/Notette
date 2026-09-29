@@ -31,9 +31,10 @@ COPY --from=build /app/drizzle ./drizzle
 COPY --from=build /app/scripts ./scripts
 COPY --from=build /app/package.json ./package.json
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+# App files stay root-owned (read-only to the runtime user); only uploads are writable.
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
 	&& mkdir -p /data/uploads \
-	&& chown -R node:node /data /app
+	&& chown -R node:node /data
 
 ENV PORT=3000 \
 	HOST=0.0.0.0 \

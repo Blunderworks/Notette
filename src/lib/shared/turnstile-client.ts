@@ -35,15 +35,23 @@ const SCRIPT_ATTR = 'data-notette-turnstile';
 
 let pending: Promise<TurnstileApi> | null = null;
 
+/** `window.turnstile` can be clobbered by an element with id="turnstile" on the host page. */
+function loadedApi(): TurnstileApi | null {
+	const api = window.turnstile;
+	return api && typeof api.render === 'function' ? api : null;
+}
+
 export function loadTurnstile(): Promise<TurnstileApi> {
 	if (typeof window === 'undefined') return Promise.reject(new Error('Turnstile requires a browser'));
-	if (window.turnstile) return Promise.resolve(window.turnstile);
+	const ready = loadedApi();
+	if (ready) return Promise.resolve(ready);
 	if (pending) return pending;
 	pending = new Promise<TurnstileApi>((resolve, reject) => {
 		const existing = document.querySelector<HTMLScriptElement>(`script[${SCRIPT_ATTR}]`);
 		const script = existing ?? document.createElement('script');
 		const settle = () => {
-			if (window.turnstile) resolve(window.turnstile);
+			const api = loadedApi();
+			if (api) resolve(api);
 			else reject(new Error('Turnstile did not initialise'));
 		};
 		script.addEventListener('load', settle, { once: true });

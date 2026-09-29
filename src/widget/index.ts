@@ -24,7 +24,10 @@ interface Instance {
 
 let instance: Instance | null = null;
 
-const scriptConfig = parseScriptConfig(document.currentScript as HTMLScriptElement | null);
+// `document.currentScript` can be clobbered by host markup such as <img name="currentScript" src="https://evil">;
+// trusting it would send the widget (and its bearer token) to that host.
+const currentScript = document.currentScript;
+const scriptConfig = parseScriptConfig(currentScript instanceof HTMLScriptElement ? currentScript : null);
 
 function whenBodyReady(fn: () => void): void {
 	if (document.body) fn();

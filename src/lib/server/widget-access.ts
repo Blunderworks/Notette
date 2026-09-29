@@ -1,6 +1,6 @@
 import type { RequestEvent } from '@sveltejs/kit';
 import type { User } from '$lib/server/db/schema';
-import { ApiError, clientAddress } from '$lib/server/http';
+import { ApiError, clientNetwork } from '$lib/server/http';
 
 /**
  * Enforces the project's "allow anonymous feedback" setting on widget API
@@ -17,10 +17,10 @@ export function requireWidgetViewer(event: RequestEvent): User | null {
 	return event.locals.user;
 }
 
-/** Rate-limit key for reviewer writes: the account, the app user, or the client address. */
+/** Rate-limit key for reviewer writes: the account, the app user, or the client network. */
 export function widgetWriterKey(event: RequestEvent): string {
 	const { user, identity } = event.locals;
 	if (user) return user.id;
 	if (identity) return `app:${identity.id}`;
-	return clientAddress(event);
+	return clientNetwork(event);
 }

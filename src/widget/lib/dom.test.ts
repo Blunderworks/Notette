@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest';
+import { isSafeSelector, isSafeXPath } from '$lib/shared/locators';
 import { computeSelector, computeXPath, describeElement, elementLabel, locateElement } from './dom';
 
 function render(html: string): void {
@@ -76,5 +77,24 @@ describe('describeElement / elementLabel', () => {
 		expect(info.attributes.type).toBe('email');
 		expect(JSON.stringify(info)).not.toContain('secret@');
 		expect(elementLabel(el)).toBe('input#email "you@example.com"');
+	});
+});
+
+describe('locator safety', () => {
+	it('generated selectors and xpaths pass the shared validators', () => {
+		render(`
+			<main id="app"><section class="hero dark"><button data-testid='say "hi" (now)'>Hi</button></section>
+			<div class="2col"><ul><li>1</li><li><span>x</span><span>y</span></li></ul></div>
+			<my-widget><p>custom</p></my-widget></main>`);
+		for (const el of Array.from(document.querySelectorAll('main *'))) {
+			const selector = computeSelector(el);
+			if (selector) expect(isSafeSelector(selector), selector).toBe(true);
+			expect(isSafeXPath(computeXPath(el)), computeXPath(el)).toBe(true);
+		}
+	});
+
+	it('ignores stored locators the widget would never generate', () => {
+		render('<div><p>one</p></div>');
+		expect(locateElement({ elementSelector: 'div:has(p)', elementXpath: '//*[count(//*)>0]', elementTag: 'div', elementText: null })).toBeNull();
 	});
 });

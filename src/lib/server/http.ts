@@ -3,6 +3,7 @@ import { ZodError, type ZodType } from 'zod';
 import type { ApiErrorDto } from '$lib/shared/types';
 import type { User } from '$lib/server/db/schema';
 import { isAdminRole } from '$lib/shared/roles';
+import { addressBucket } from '$lib/server/rate-limit';
 
 export class ApiError extends Error {
 	constructor(
@@ -95,3 +96,11 @@ export function clientAddress(event: RequestEvent): string {
 		return 'unknown';
 	}
 }
+
+/** Rate-limit key for the caller's network: the IPv4 address or the IPv6 /64. */
+export function clientNetwork(event: RequestEvent): string {
+	return addressBucket(clientAddress(event));
+}
+
+/** Failed-password budget per account, shared by dashboard and widget sign-in, on top of the per-network limits. */
+export const ACCOUNT_LOGIN_LIMIT = { max: 30, windowMs: 15 * 60 * 1000 };

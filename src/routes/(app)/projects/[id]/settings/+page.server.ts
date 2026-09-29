@@ -32,6 +32,7 @@ export const load: PageServerLoad = async ({ url, params, locals, parent }) => {
 	return {
 		created: url.searchParams.get('created') === '1',
 		emailConfigured: config.emailEnabled,
+		verificationConfigured: config.verificationEmailEnabled,
 		turnstileConfigured: (await parent()).project.turnstileConfigured,
 		/** The signed-in admin's own preference for this project. */
 		emailNotifications,
@@ -56,7 +57,7 @@ export const load: PageServerLoad = async ({ url, params, locals, parent }) => {
 		// Owners/admins already have access everywhere, so only member accounts can be added.
 		candidates: allUsers
 			.filter((u) => u.role === 'member' && !memberIds.has(u.id))
-			.map((u) => ({ id: u.id, name: u.name, email: u.email }))
+			.map((u) => ({ id: u.id, name: u.name, email: u.email, verified: !!u.emailVerifiedAt }))
 	};
 };
 
@@ -196,7 +197,9 @@ export const actions: Actions = {
 				return fail(409, {
 					action: 'createMember',
 					memberValues,
-					errors: ['A user with this email already exists. Add them from the list instead.']
+					errors: [
+						'A user with this email already exists. Add them from the list instead. Accounts marked "email not confirmed" signed up from the widget and may not belong to the owner of that address.'
+					]
 				});
 			}
 			throw err;

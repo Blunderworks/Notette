@@ -44,6 +44,17 @@ export function pluralize(count: number, singular: string, plural = `${singular}
 	return `${count} ${count === 1 ? singular : plural}`;
 }
 
+/** True for absolute http(s) URLs; anything else (e.g. `javascript:`) must not become a link. */
+export function isHttpUrl(value: string | null | undefined): boolean {
+	if (!value) return false;
+	try {
+		const { protocol } = new URL(value);
+		return protocol === 'http:' || protocol === 'https:';
+	} catch {
+		return false;
+	}
+}
+
 /** Appends ?notette=<id> to a page URL so the widget focuses that pin on load. */
 export function siteLinkForFeedback(url: string, id: string): string {
 	try {

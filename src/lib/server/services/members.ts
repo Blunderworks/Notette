@@ -1,6 +1,7 @@
 import { and, asc, eq } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { projectMembers, projects, sessions, users, type Project, type User } from '$lib/server/db/schema';
+import { config } from '$lib/server/env';
 import { isAdminRole } from '$lib/shared/roles';
 
 export interface ProjectMemberRow {
@@ -68,6 +69,15 @@ export async function listProjectsForMember(userId: string): Promise<Project[]> 
 }
 
 /**
+ * The project only admits accounts that confirmed their address. Widget
+ * self-signups start unconfirmed (see `auth/signup`), so an address claimed on
+ * a project without verification is not trusted on one that requires it.
+ */
+export function requiresConfirmedEmail(project: Pick<Project, 'emailVerificationRequired'>): boolean {
+	return project.emailVerificationRequired && config.verificationEmailEnabled;
+}
+
+/**
  * Central access rule for signed-in users on a project. Owners and admins
  * always have access. Members have access when they were added to the project
  * or when the project is open for signups, in which case they are added on
@@ -75,6 +85,7 @@ export async function listProjectsForMember(userId: string): Promise<Project[]> 
  */
 export async function ensureProjectAccess(user: User, project: Project): Promise<boolean> {
 	if (isAdminRole(user.role)) return true;
+	if (!user.emailVerifiedAt && requiresConfirmedEmail(project)) return false;
 	if (await isProjectMember(project.id, user.id)) return true;
 	if (project.openSignups) {
 		await addProjectMember(project.id, user.id, null);

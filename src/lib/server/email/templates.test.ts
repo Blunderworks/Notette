@@ -116,19 +116,17 @@ describe('buildDigest', () => {
 describe('renderVerificationEmail', () => {
 	it('mentions the site and includes the link in both parts', () => {
 		const email = renderVerificationEmail({
-			name: 'Ada <3',
 			link: 'https://notette.test/verify-email?token=ntv_abc',
 			origin: 'https://site.test',
 			expiresHours: 24
 		});
 		expect(email.subject).toBe('Confirm your email to leave feedback on site.test');
-		expect(email.html).toContain('Ada &lt;3');
 		expect(email.html).toContain('href="https://notette.test/verify-email?token=ntv_abc"');
 		expect(email.text).toContain('https://notette.test/verify-email?token=ntv_abc');
 		expect(email.text).toContain('site.test');
 	});
 	it('falls back to a generic subject without an origin', () => {
-		expect(renderVerificationEmail({ name: 'A', link: 'https://x/y', origin: null, expiresHours: 24 }).subject).toBe(
+		expect(renderVerificationEmail({ link: 'https://x/y', origin: null, expiresHours: 24 }).subject).toBe(
 			'Confirm your email for Notette'
 		);
 	});

@@ -85,6 +85,13 @@ export const config = {
 	get emailEnabled(): boolean {
 		return !!(this.smtpHost && this.emailFrom);
 	},
+	/**
+	 * Confirmation links are only sent with a configured public URL: building
+	 * them from the request Host header would let anyone point them elsewhere.
+	 */
+	get verificationEmailEnabled(): boolean {
+		return this.emailEnabled && !!this.publicUrl;
+	},
 	/** How long to collect activity for one recipient before sending a single digest email. */
 	get emailBatchSeconds(): number {
 		return readInt('NOTETTE_EMAIL_BATCH_SECONDS', 60);

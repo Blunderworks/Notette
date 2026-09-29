@@ -1,9 +1,9 @@
 import { json } from '@sveltejs/kit';
-import { verifyPassword } from '$lib/server/auth/password';
+import { verifyUserPassword } from '$lib/server/auth/password';
 import { createSession } from '$lib/server/auth/sessions';
-import { ApiError, api, clientAddress, readJson } from '$lib/server/http';
+import { ACCOUNT_LOGIN_LIMIT, ApiError, api, clientAddress, clientNetwork, readJson } from '$lib/server/http';
 import { rateLimit } from '$lib/server/rate-limit';
-import { ensureProjectAccess } from '$lib/server/services/members';
+import { ensureProjectAccess, requiresConfirmedEmail } from '$lib/server/services/members';
 import { getUserByEmail } from '$lib/server/services/users';
 import { widgetViewer } from '$lib/server/widget-viewer';
 import { requireTurnstile } from '$lib/server/turnstile';
@@ -17,7 +17,7 @@ import type { WidgetAuthResultDto } from '$lib/shared/types';
  */
 export const POST = api(async (event) => {
 	const { project, origin } = event.locals.widget!;
-	const limit = rateLimit(`widget-login:${clientAddress(event)}`, 10, 15 * 60 * 1000);
+	const limit = rateLimit(`widget-login:${clientNetwork(event)}`, 10, 15 * 60 * 1000);
 	if (!limit.ok) {
 		throw new ApiError(429, 'Too many sign-in attempts, please try again later', 'rate_limited', {
 			retryAfter: limit.retryAfter
@@ -26,10 +26,13 @@ export const POST = api(async (event) => {
 	const input = await readJson(event.request, widgetLoginSchema);
 	await requireTurnstile(event, project, input.turnstileToken);
 
+	if (!rateLimit(`login-account:${input.email}`, ACCOUNT_LOGIN_LIMIT.max, ACCOUNT_LOGIN_LIMIT.windowMs).ok) {
+		throw new ApiError(429, 'Too many sign-in attempts for this account, please try again later', 'rate_limited');
+	}
 	const user = await getUserByEmail(input.email);
-	const valid = user ? await verifyPassword(input.password, user.passwordHash) : false;
+	const valid = await verifyUserPassword(input.password, user?.passwordHash);
 	if (!user || !valid) throw new ApiError(400, 'Incorrect email or password', 'invalid_credentials');
-	if (!user.emailVerifiedAt) {
+	if (!user.emailVerifiedAt && requiresConfirmedEmail(project)) {
 		throw new ApiError(403, 'Confirm your email address first. Check your inbox for the link we sent.', 'email_unverified');
 	}
 	if (!(await ensureProjectAccess(user, project))) {

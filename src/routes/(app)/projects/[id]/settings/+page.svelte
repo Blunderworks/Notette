@@ -195,7 +195,7 @@
 				<select class="select" name="userId" required style="flex: 1; min-width: 240px" aria-label="Existing member account">
 					<option value="">{data.candidates.length ? 'Add an existing member account…' : 'No other member accounts to add'}</option>
 					{#each data.candidates as candidate (candidate.id)}
-						<option value={candidate.id}>{candidate.name} ({candidate.email})</option>
+						<option value={candidate.id}>{candidate.name} ({candidate.email}){candidate.verified ? '' : ' · email not confirmed'}</option>
 					{/each}
 				</select>
 				<button class="btn" type="submit" disabled={data.candidates.length === 0}>Add</button>
@@ -281,19 +281,20 @@
 				</span>
 			</label>
 			<label class="checkbox">
-				<input type="checkbox" name="emailVerificationRequired" checked={values.emailVerificationRequired} disabled={!data.emailConfigured} />
+				<input type="checkbox" name="emailVerificationRequired" checked={values.emailVerificationRequired} disabled={!data.verificationConfigured} />
 				<span>
 					<strong>Require email verification for signups</strong>
 					<span class="help" style="display: block">
-						{#if data.emailConfigured}
+						{#if data.verificationConfigured}
 							Accounts created from the widget must confirm their email address through a link before they can sign in.
 						{:else}
-							Needs outgoing email: set <code class="inline">SMTP_HOST</code> and <code class="inline">EMAIL_FROM</code> on the server to enable this.
+							Needs outgoing email and a public URL: set <code class="inline">SMTP_HOST</code>,
+							<code class="inline">EMAIL_FROM</code> and <code class="inline">NOTETTE_URL</code> on the server to enable this.
 						{/if}
 					</span>
 				</span>
 			</label>
-			{#if !data.emailConfigured && values.emailVerificationRequired}
+			{#if !data.verificationConfigured && values.emailVerificationRequired}
 				<input type="hidden" name="emailVerificationRequired" value="on" />
 			{/if}
 		</div>

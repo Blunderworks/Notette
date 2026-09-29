@@ -1,4 +1,4 @@
-import { json, text, type Handle, type HandleServerError, type RequestEvent, type ServerInit } from '@sveltejs/kit';
+import { error, json, redirect, type Handle, type HandleServerError, type RequestEvent, type ServerInit } from '@sveltejs/kit';
 import { sequence } from '@sveltejs/kit/hooks';
 import { config } from '$lib/server/env';
 import { runMigrations } from '$lib/server/db/migrate';
@@ -15,7 +15,7 @@ import { deleteExpiredVerifications } from '$lib/server/services/email-verificat
 import { cleanupNotifications, startNotificationScheduler } from '$lib/server/services/notifications';
 import { checkEmailTransport } from '$lib/server/email/mailer';
 import { errorResponse } from '$lib/server/http';
-import { applyCors, corsHeaders, WIDGET_API_PREFIX } from '$lib/server/widget-cors';
+import { applyCors, corsHeaders, widgetApiKey } from '$lib/server/widget-cors';
 
 export const init: ServerInit = async () => {
 	if (config.autoMigrate) {
@@ -36,6 +36,9 @@ export const init: ServerInit = async () => {
 			}
 		});
 		startNotificationScheduler();
+		if (!config.publicUrl) {
+			console.warn('[notette] NOTETTE_URL is not set: email links are omitted and email verification is unavailable');
+		}
 	}
 
 	const maintenance = async () => {
@@ -64,10 +67,9 @@ const widgetApi: Handle = async ({ event, resolve }) => {
 	event.locals.identity = null;
 	event.locals.widget = null;
 
-	const { pathname } = event.url;
-	if (!pathname.startsWith(WIDGET_API_PREFIX)) return resolve(event);
+	const key = widgetApiKey(event);
+	if (key === null) return resolve(event);
 
-	const key = pathname.slice(WIDGET_API_PREFIX.length).split('/')[0] ?? '';
 	const origin = getRequestOrigin(event.request);
 	const project = key ? await getProjectByClientKey(key) : null;
 	const allowed = !!(project && origin && isOriginAllowed(origin, project.allowedOrigins));
@@ -129,25 +131,32 @@ const widgetApi: Handle = async ({ event, resolve }) => {
 const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 /**
- * Refusal for a dashboard mutation the caller may not perform. Enhanced forms
- * (`use:enhance`) get an ActionResult as SvelteKit would send; plain form
- * posts get an HTTP redirect or status.
+ * Enforces `dashboardAccess` for every `(app)` request. Layout loads cannot do
+ * it alone: form actions skip them, and `__data.json` requests can skip any
+ * node via `x-sveltekit-invalidated`. Signed-out callers are redirected (SvelteKit
+ * shapes the redirect for pages, data and actions). Members get a 403 for data
+ * and action requests; full page views reach the layout, which renders the
+ * styled 403 page.
  */
-function deniedMutation(event: RequestEvent, access: 'sign_in' | 'forbidden'): Response {
-	const enhanced = event.request.headers.get('x-sveltekit-action') === 'true';
+function guardDashboard(event: RequestEvent): Response | null {
+	const access = dashboardAccess(event.route.id, event.locals.user);
+	const read = READ_METHODS.has(event.request.method);
 	if (access === 'sign_in') {
-		const location = `/login?redirect=${encodeURIComponent(event.url.pathname)}`;
-		return enhanced
-			? json({ type: 'redirect', status: 303, location })
-			: new Response(null, { status: 303, headers: { location } });
+		const target = read ? event.url.pathname + event.url.search : event.url.pathname;
+		redirect(303, `/login?redirect=${encodeURIComponent(target)}`);
 	}
-	const message = 'This action requires an admin account';
-	return enhanced ? json({ type: 'error', error: { message } }, { status: 403 }) : text(message, { status: 403 });
+	if (access === 'allowed' || (read && !event.isDataRequest)) return null;
+	const message = 'This page requires an admin account';
+	// Enhanced form actions expect an ActionResult.
+	if (event.request.headers.get('x-sveltekit-action') === 'true') {
+		return json({ type: 'error', error: { message } }, { status: 403 });
+	}
+	error(403, message);
 }
 
-/** Dashboard: cookie sessions, the `(app)` access rule for mutations, and baseline security headers. */
+/** Dashboard: cookie sessions, the `(app)` access rule, and baseline security headers. */
 const dashboard: Handle = async ({ event, resolve }) => {
-	if (event.url.pathname.startsWith(WIDGET_API_PREFIX)) return resolve(event);
+	if (widgetApiKey(event) !== null) return resolve(event);
 
 	const token = event.cookies.get(SESSION_COOKIE);
 	if (token) {
@@ -161,10 +170,7 @@ const dashboard: Handle = async ({ event, resolve }) => {
 		}
 	}
 
-	// Form actions run without layout loads, so the (app) layout's sign-in and
-	// role gate would not apply to them; enforce the same rule for every mutation.
-	const access = READ_METHODS.has(event.request.method) ? 'allowed' : dashboardAccess(event.route.id, event.locals.user);
-	const response = access === 'allowed' ? await resolve(event) : deniedMutation(event, access);
+	const response = guardDashboard(event) ?? (await resolve(event));
 	response.headers.set('X-Content-Type-Options', 'nosniff');
 	response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
 	if (!response.headers.has('X-Frame-Options')) response.headers.set('X-Frame-Options', 'DENY');

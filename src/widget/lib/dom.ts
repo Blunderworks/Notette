@@ -1,3 +1,4 @@
+import { isSafeSelector, isSafeXPath } from '$lib/shared/locators';
 import type { ElementRect, FeedbackSummaryDto } from '$lib/shared/types';
 
 const CAPTURED_ATTRIBUTES = [
@@ -229,9 +230,13 @@ function textMatches(el: Element, expected: string | null): boolean {
 	return actual.includes(probe);
 }
 
-/** Finds the element a feedback item was attached to, if it still exists. */
+/**
+ * Finds the element a feedback item was attached to, if it still exists.
+ * Locators come from other reviewers, so only generated shapes are evaluated
+ * (older rows may predate server-side validation).
+ */
 export function locateElement(item: Pick<FeedbackSummaryDto, 'elementSelector' | 'elementXpath' | 'elementTag' | 'elementText'>): Element | null {
-	if (item.elementSelector) {
+	if (item.elementSelector && isSafeSelector(item.elementSelector)) {
 		try {
 			const matches = Array.from(document.querySelectorAll(item.elementSelector));
 			if (matches.length === 1) return matches[0];
@@ -242,7 +247,7 @@ export function locateElement(item: Pick<FeedbackSummaryDto, 'elementSelector' |
 			/* invalid selector for this document */
 		}
 	}
-	if (item.elementXpath) {
+	if (item.elementXpath && isSafeXPath(item.elementXpath)) {
 		const el = evaluateXPath(item.elementXpath);
 		if (el && (!item.elementTag || el.tagName.toLowerCase() === item.elementTag)) return el;
 	}

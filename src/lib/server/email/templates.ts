@@ -119,30 +119,30 @@ function hostOf(origin: string | null): string | null {
 }
 
 export interface VerificationEmailInput {
-	name: string;
 	link: string;
 	/** Site the sign-up came from (widget origin), if known. */
 	origin: string | null;
 	expiresHours: number;
 }
 
-/** Account confirmation email for widget sign-ups. */
+/**
+ * Account confirmation email for widget sign-ups. Anyone can sign up with any
+ * address, so it carries no sign-up-supplied text (such as the name).
+ */
 export function renderVerificationEmail(input: VerificationEmailInput): RenderedEmail {
 	const site = hostOf(input.origin);
 	const subject = site ? `Confirm your email to leave feedback on ${site}` : 'Confirm your email for Notette';
 	const where = site ? ` to leave feedback on <strong>${escapeHtml(site)}</strong>` : '';
 	const body = `
 <h1 style="margin:0 0 12px;font-size:20px;line-height:1.3;">Confirm your email address</h1>
-<p style="margin:0 0 16px;color:${palette.muted};">Hi ${escapeHtml(input.name)}, you created a Notette account${where}. Confirm your address to finish signing up; afterwards you can sign in from the widget.</p>
+<p style="margin:0 0 16px;color:${palette.muted};">A Notette account was created with this address${where}. Confirm your address to finish signing up; afterwards you can sign in from the widget.</p>
 <p style="margin:0 0 20px;">${button(input.link, 'Confirm email')}</p>
 <p style="margin:0 0 6px;color:${palette.faint};font-size:12px;">Or paste this link into your browser:</p>
 <p style="margin:0 0 16px;font-family:${MONO};font-size:12px;word-break:break-all;"><a href="${escapeHtml(input.link)}" style="color:${palette.accent};">${escapeHtml(input.link)}</a></p>
 <p style="margin:0;color:${palette.faint};font-size:12px;">This link expires in ${input.expiresHours} hours. If you did not create this account, you can ignore this email.</p>`;
 	const html = layout({ title: subject, preheader: 'Confirm your email to finish signing up.', body });
 	const text = [
-		`Hi ${input.name},`,
-		'',
-		`You created a Notette account${site ? ` to leave feedback on ${site}` : ''}. Confirm your email address by opening this link:`,
+		`A Notette account was created with this address${site ? ` to leave feedback on ${site}` : ''}. Confirm your email address by opening this link:`,
 		'',
 		input.link,
 		'',

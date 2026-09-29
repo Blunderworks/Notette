@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest';
-import { applyFrozenAnimations, freezeAnimations } from './screenshot';
+import { applyFrozenAnimations, freezeAnimations, maskEnteredValues } from './screenshot';
 
 interface FakeAnimation {
 	target: Element;
@@ -92,5 +92,29 @@ describe('applyFrozenAnimations', () => {
 		expect(cloned.style.getPropertyPriority('opacity')).toBe('important');
 		expect(cloned.style.getPropertyValue('animation')).toBe('none');
 		expect(cloned.style.getPropertyValue('transition')).toBe('none');
+	});
+});
+
+describe('maskEnteredValues', () => {
+	it('blanks typed and password values but keeps page defaults and controls', () => {
+		document.body.innerHTML = `
+			<input id="prefilled" value="Acme Inc">
+			<input id="typed" value="">
+			<input id="secret" type="password" value="hunter22">
+			<input id="check" type="checkbox" value="yes">
+			<input id="submit" type="submit" value="Save">
+			<textarea id="notes">default</textarea>
+			<textarea id="edited"></textarea>`;
+		const get = (id: string) => document.getElementById(id) as HTMLInputElement;
+		get('typed').value = 'jane@example.com';
+		(document.getElementById('edited') as HTMLTextAreaElement).value = 'private note';
+		maskEnteredValues(document);
+		expect(get('prefilled').value).toBe('Acme Inc');
+		expect(get('typed').value).toBe('');
+		expect(get('secret').value).toBe('');
+		expect(get('check').value).toBe('yes');
+		expect(get('submit').value).toBe('Save');
+		expect((document.getElementById('notes') as HTMLTextAreaElement).value).toBe('default');
+		expect((document.getElementById('edited') as HTMLTextAreaElement).value).toBe('');
 	});
 });

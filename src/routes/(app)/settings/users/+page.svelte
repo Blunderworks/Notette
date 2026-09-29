@@ -42,7 +42,7 @@
 							<td>{user.name}{#if user.isSelf}<span class="faint"> (you)</span>{/if}</td>
 							<td class="muted">
 								{user.email}
-								{#if !user.verified}<span class="badge neutral" title="Has not confirmed their email address yet and cannot sign in">unverified</span>{/if}
+								{#if !user.verified}<span class="badge neutral" title="Has not confirmed their email address: cannot use the dashboard, receive email or join projects that require confirmation. Widget sign-ups can use any address.">unverified</span>{/if}
 							</td>
 							<td>
 								{#if data.canManage && !user.isSelf}

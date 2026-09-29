@@ -1,5 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { eq } from 'drizzle-orm';
+import { and, eq, gt } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { feedback as feedbackTable } from '$lib/server/db/schema';
 import { config } from '$lib/server/env';
@@ -32,12 +32,23 @@ export const PUT = api(async (event) => {
 	if (!item || item.projectId !== project.id) throw new ApiError(404, 'Feedback not found', 'not_found');
 
 	// Only admins may attach screenshots without the one-time token; members use the token like reviewers.
+	// The token is claimed atomically before the body is read, so parallel uploads cannot reuse it.
 	if (!adminUser(event)) {
 		const token = event.request.headers.get('x-notette-upload-token') ?? '';
-		const fresh = Date.now() - item.createdAt.getTime() < UPLOAD_WINDOW_MS;
-		if (!item.uploadTokenHash || !token || sha256(token) !== item.uploadTokenHash || !fresh) {
-			throw new ApiError(403, 'Not allowed to attach a screenshot to this item', 'forbidden');
-		}
+		const claimed = token
+			? await db
+					.update(feedbackTable)
+					.set({ uploadTokenHash: null })
+					.where(
+						and(
+							eq(feedbackTable.id, item.id),
+							eq(feedbackTable.uploadTokenHash, sha256(token)),
+							gt(feedbackTable.createdAt, new Date(Date.now() - UPLOAD_WINDOW_MS))
+						)
+					)
+					.returning({ id: feedbackTable.id })
+			: [];
+		if (!claimed.length) throw new ApiError(403, 'Not allowed to attach a screenshot to this item', 'forbidden');
 	}
 
 	const maxBytes = config.maxScreenshotBytes;

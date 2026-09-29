@@ -2,6 +2,7 @@ import { desc, eq, lt } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { emailVerifications, users, type User } from '$lib/server/db/schema';
 import { renderVerificationEmail } from '$lib/server/email/templates';
+import { config } from '$lib/server/env';
 import { sendEmail } from '$lib/server/email/mailer';
 import { randomToken, sha256 } from '$lib/server/ids';
 import { getUserByEmail } from './users';
@@ -28,11 +29,15 @@ export function verificationLink(baseUrl: string, token: string): string {
 	return `${baseUrl}/verify-email?token=${encodeURIComponent(token)}`;
 }
 
-/** Issues a token and emails the confirmation link. Throws when the email cannot be sent. */
-export async function sendVerificationEmail(user: User, origin: string | null, baseUrl: string): Promise<void> {
+/**
+ * Issues a token and emails the confirmation link, always built from the
+ * configured public URL. Throws when the email cannot be sent.
+ */
+export async function sendVerificationEmail(user: User, origin: string | null): Promise<void> {
+	const baseUrl = config.publicUrl;
+	if (!config.verificationEmailEnabled || !baseUrl) throw new Error('Confirmation emails need SMTP and NOTETTE_URL');
 	const token = await issueVerificationToken(user.id, origin);
 	const email = renderVerificationEmail({
-		name: user.name,
 		link: verificationLink(baseUrl, token),
 		origin,
 		expiresHours: VERIFICATION_TTL_HOURS
@@ -77,7 +82,8 @@ export async function verifyEmailToken(raw: string | null | undefined): Promise<
  * unknown or already verified addresses so the endpoint does not reveal
  * which emails have accounts.
  */
-export async function resendVerificationEmail(email: string, baseUrl: string): Promise<void> {
+export async function resendVerificationEmail(email: string): Promise<void> {
+	if (!config.verificationEmailEnabled) return;
 	const user = await getUserByEmail(email);
 	if (!user || user.emailVerifiedAt) return;
 	const [latest] = await db
@@ -86,7 +92,7 @@ export async function resendVerificationEmail(email: string, baseUrl: string): P
 		.where(eq(emailVerifications.userId, user.id))
 		.orderBy(desc(emailVerifications.createdAt))
 		.limit(1);
-	await sendVerificationEmail(user, latest?.origin ?? null, baseUrl);
+	await sendVerificationEmail(user, latest?.origin ?? null);
 }
 
 export async function deleteExpiredVerifications(): Promise<number> {

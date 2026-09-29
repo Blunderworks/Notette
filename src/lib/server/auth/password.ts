@@ -54,3 +54,17 @@ export async function verifyPassword(password: string, stored: string): Promise<
 		return false;
 	}
 }
+
+let dummyHash: Promise<string> | null = null;
+
+/**
+ * Checks a sign-in attempt. Without an account the same scrypt work is done
+ * against a throwaway hash, so response time does not reveal which email
+ * addresses have accounts.
+ */
+export async function verifyUserPassword(password: string, stored: string | null | undefined): Promise<boolean> {
+	if (stored) return verifyPassword(password, stored);
+	dummyHash ??= hashPassword(randomBytes(16).toString('hex'));
+	await verifyPassword(password, await dummyHash);
+	return false;
+}

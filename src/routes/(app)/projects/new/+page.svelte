@@ -86,19 +86,20 @@
 				</span>
 			</label>
 			<label class="checkbox">
-				<input type="checkbox" name="emailVerificationRequired" checked={values.emailVerificationRequired} disabled={!data.emailConfigured} />
+				<input type="checkbox" name="emailVerificationRequired" checked={values.emailVerificationRequired} disabled={!data.verificationConfigured} />
 				<span>
 					<strong>Require email verification for signups</strong>
 					<span class="help" style="display: block">
-						{#if data.emailConfigured}
+						{#if data.verificationConfigured}
 							Accounts created from the widget must confirm their email address before they can sign in.
 						{:else}
-							Needs outgoing email (<code class="inline">SMTP_HOST</code> and <code class="inline">EMAIL_FROM</code>) on the server.
+							Needs outgoing email (<code class="inline">SMTP_HOST</code> and <code class="inline">EMAIL_FROM</code>) and
+							<code class="inline">NOTETTE_URL</code> on the server.
 						{/if}
 					</span>
 				</span>
 			</label>
-			{#if !data.emailConfigured && values.emailVerificationRequired}
+			{#if !data.verificationConfigured && values.emailVerificationRequired}
 				<input type="hidden" name="emailVerificationRequired" value="on" />
 			{/if}
 		</div>

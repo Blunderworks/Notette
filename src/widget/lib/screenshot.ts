@@ -192,6 +192,27 @@ export function applyFrozenAnimations(clone: Document, frozen: FrozenAnimations)
 	}
 }
 
+/** Input types whose value is text the user may have entered. */
+const TEXT_INPUT_TYPES = new Set(['', 'text', 'search', 'email', 'tel', 'url', 'number', 'password', 'date', 'datetime-local', 'month', 'time', 'week']);
+
+/**
+ * Screenshots can be visible to every reviewer, so typed form values are left
+ * out: password fields always, other text fields when their value differs from
+ * the page's own default (typed or set by scripts). Runs on the clone only.
+ */
+export function maskEnteredValues(doc: Document): void {
+	for (const el of Array.from(doc.querySelectorAll('input, textarea'))) {
+		if (el instanceof HTMLTextAreaElement) {
+			if (el.value !== el.defaultValue) el.value = '';
+			continue;
+		}
+		const input = el as HTMLInputElement;
+		const type = (input.getAttribute('type') ?? '').toLowerCase();
+		if (!TEXT_INPUT_TYPES.has(type)) continue;
+		if (type === 'password' || input.value !== input.defaultValue) input.value = '';
+	}
+}
+
 /**
  * Captures the viewport as a JPEG. Never throws: returns null when the
  * capture fails or exceeds the timeout so feedback can still be submitted.
@@ -223,6 +244,7 @@ export async function captureViewport(options: CaptureOptions): Promise<Screensh
 					// The clone exists now; the live page no longer needs the tags.
 					frozen.release();
 					applyFrozenAnimations(clone, frozen);
+					maskEnteredValues(clone);
 				}
 			}),
 			new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs))

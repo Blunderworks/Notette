@@ -612,28 +612,51 @@ class _MentionText extends StatelessWidget {
   }
 }
 
+/// Reviewer-supplied values must not add structure to the export (a newline
+/// could start a fake section for the agent); only the quoted body keeps lines.
+String _inline(Object? value) => '$value'
+    .replaceAll(RegExp(r'[\u0000-\u001f\u007f\u2028\u2029\s]+'), ' ')
+    .trim();
+
+/// Self-reported names are labelled so "Caleb (admin)" cannot pass as a role.
+String _author(Map<String, dynamic> m, String fallback) {
+  final name = m['authorName'] == null ? '' : _inline(m['authorName']);
+  if (name.isEmpty) return fallback;
+  final role = m['isAdmin'] == true
+      ? 'admin'
+      : m['isMember'] == true
+          ? 'member'
+          : m['isVerified'] == true
+              ? 'verified app user'
+              : 'anonymous';
+  return '$name ($role)';
+}
+
 String _agentMarkdown(
     Map<String, dynamic> item, String project, String dashboard) {
   final out = <String>[
     '# ${project.isEmpty ? 'Feedback' : '$project feedback'} #${item['number']} (${item['status']})',
     '',
     ...'${item['body']}'.split('\n').map((l) => '> $l'),
-    '— ${item['authorName'] ?? 'Anonymous reviewer'}, ${item['createdAt']}'
+    '— ${_author(item, 'Anonymous reviewer')}, ${item['createdAt']}'
   ];
   final comments = _maps(item['comments']);
   if (comments.isNotEmpty) {
     out.addAll(['', '## Replies']);
     for (final c in comments) {
       out.add(
-          '- **${c['authorName'] ?? 'Anonymous'}** (${c['createdAt']}): ${c['body']}');
+          '- **${_author(c, 'Anonymous')}** (${c['createdAt']}): ${_inline(c['body'])}');
     }
   }
   void section(String title, Map<String, dynamic> values) {
     final entries =
         values.entries.where((e) => e.value != null && '${e.value}'.isNotEmpty);
     if (entries.isEmpty) return;
-    out.addAll(
-        ['', '## $title', ...entries.map((e) => '- ${e.key}: ${e.value}')]);
+    out.addAll([
+      '',
+      '## $title',
+      ...entries.map((e) => '- ${_inline(e.key)}: ${_inline(e.value)}')
+    ]);
   }
 
   section('Page', {
@@ -657,14 +680,14 @@ String _agentMarkdown(
   });
   if (item['deployment'] is Map)
     section('Deployment', Map<String, dynamic>.from(item['deployment']));
-  if (item['metadata'] is Map && (item['metadata'] as Map).isNotEmpty)
-    out.addAll([
-      '',
-      '## Metadata',
-      '```json',
-      const JsonEncoder.withIndent('  ').convert(item['metadata']),
-      '```'
-    ]);
+  if (item['metadata'] is Map && (item['metadata'] as Map).isNotEmpty) {
+    final json = const JsonEncoder.withIndent('  ').convert(item['metadata']);
+    // A fence longer than any backtick run in the JSON cannot be closed early.
+    final longest = RegExp(r'`+').allMatches(json).fold<int>(
+        0, (max, m) => m.group(0)!.length > max ? m.group(0)!.length : max);
+    final fence = '`' * (longest + 1 < 3 ? 3 : longest + 1);
+    out.addAll(['', '## Metadata', '${fence}json', json, fence]);
+  }
   section('Links & environment', {
     'Screenshot': item['screenshotUrl'],
     'Dashboard': dashboard,

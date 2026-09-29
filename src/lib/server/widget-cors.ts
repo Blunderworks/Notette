@@ -1,4 +1,17 @@
+import type { RequestEvent } from '@sveltejs/kit';
+
 export const WIDGET_API_PREFIX = '/api/widget/';
+
+/**
+ * Project key when the request targets the widget API, else null. Uses the
+ * matched route because SvelteKit decodes paths before matching (so
+ * `/api/%77idget/…` reaches widget routes); the raw prefix covers unmatched paths.
+ */
+export function widgetApiKey(event: Pick<RequestEvent, 'route' | 'params' | 'url'>): string | null {
+	if (event.route.id?.startsWith('/api/widget/[key]')) return event.params.key ?? '';
+	const { pathname } = event.url;
+	return pathname.startsWith(WIDGET_API_PREFIX) ? (pathname.slice(WIDGET_API_PREFIX.length).split('/')[0] ?? '') : null;
+}
 
 export function corsHeaders(origin: string, preflight = false): Record<string, string> {
 	const headers: Record<string, string> = {

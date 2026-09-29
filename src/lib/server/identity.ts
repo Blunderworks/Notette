@@ -2,7 +2,7 @@ import { createPublicKey, type KeyObject } from 'node:crypto';
 import { createRemoteJWKSet, errors, jwtVerify, type JWTPayload, type JWTVerifyGetKey, type JWTVerifyOptions } from 'jose';
 import type { Project } from '$lib/server/db/schema';
 import { randomToken } from '$lib/server/ids';
-import { emailSchema } from '$lib/server/validation';
+import { emailSchema, singleLine } from '$lib/server/validation';
 
 /**
  * Identity verification: the host app's backend signs a short-lived JWT for
@@ -139,7 +139,7 @@ function invalid(message: string): IdentityResult {
 
 function trimmed(value: unknown, max: number): string | null {
 	if (typeof value !== 'string') return null;
-	const text = value.trim();
+	const text = singleLine(value);
 	return text ? text.slice(0, max) : null;
 }
 

@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from '$lib/server/auth/password';
 import { TURNSTILE_TOKEN_MAX_LENGTH } from '$lib/server/turnstile-verify';
+import { isHttpUrl } from '$lib/format';
+import { isSafeSelector, isSafeXPath } from '$lib/shared/locators';
 
 const shortText = (max: number) => z.string().trim().max(max);
 const optionalShortText = (max: number) =>
@@ -9,6 +11,24 @@ const optionalShortText = (max: number) =>
 		.trim()
 		.max(max)
 		.optional()
+		.transform((v) => (v ? v : undefined));
+
+/**
+ * Collapses control characters, line breaks and runs of whitespace into single
+ * spaces. Used for display names and titles, which reach email subjects,
+ * plain-text emails and Markdown exports where a newline could forge content.
+ */
+export function singleLine(value: string): string {
+	return value.replace(/[\p{Cc}\p{Zl}\p{Zp}\s]+/gu, ' ').trim();
+}
+
+const nameText = (max: number) => z.string().transform(singleLine).pipe(z.string().max(max));
+const optionalNameText = (max: number) =>
+	z
+		.string()
+		.optional()
+		.transform((v) => (v ? singleLine(v) : undefined))
+		.pipe(z.string().max(max).optional())
 		.transform((v) => (v ? v : undefined));
 
 export const emailSchema = z.string().trim().toLowerCase().email().max(254);
@@ -38,7 +58,13 @@ const attributesSchema = z
 
 const deploymentSchema = z
 	.record(z.string().max(64), z.string().max(500).optional())
-	.refine((obj) => Object.keys(obj).length <= 16, { message: 'Too many deployment fields' });
+	.refine((obj) => Object.keys(obj).length <= 16, { message: 'Too many deployment fields' })
+	// The dashboard links `url`; only web addresses may be stored there.
+	.transform((obj) => {
+		if (obj.url === undefined || isHttpUrl(obj.url)) return obj;
+		const { url: _dropped, ...rest } = obj;
+		return rest;
+	});
 
 const metadataSchema = z
 	.record(z.string().max(64), z.unknown())
@@ -48,7 +74,7 @@ export const feedbackCreateSchema = z.object({
 	body: z.string().trim().min(1, 'Comment cannot be empty').max(5000),
 	author: z
 		.object({
-			name: optionalShortText(120),
+			name: optionalNameText(120),
 			email: z
 				.string()
 				.trim()
@@ -59,7 +85,7 @@ export const feedbackCreateSchema = z.object({
 		.optional(),
 	page: z.object({
 		url: z.string().trim().url().max(2048),
-		title: optionalShortText(300),
+		title: optionalNameText(300),
 		// Optional so custom forms can post without layout details.
 		viewportWidth: finiteInt.pipe(z.number().min(0).max(100_000)).optional(),
 		viewportHeight: finiteInt.pipe(z.number().min(0).max(100_000)).optional(),
@@ -76,8 +102,9 @@ export const feedbackCreateSchema = z.object({
 		.optional(),
 	element: z
 		.object({
-			selector: optionalShortText(1000),
-			xpath: optionalShortText(1000),
+			// Evaluated in other reviewers' browsers: keep only the shapes the widget generates.
+			selector: optionalShortText(1000).transform((v) => (v && isSafeSelector(v) ? v : undefined)),
+			xpath: optionalShortText(1000).transform((v) => (v && isSafeXPath(v) ? v : undefined)),
 			tag: optionalShortText(64),
 			text: optionalShortText(500),
 			attributes: attributesSchema.optional(),
@@ -98,7 +125,7 @@ export const commentCreateSchema = z.object({
 	body: z.string().trim().min(1, 'Reply cannot be empty').max(5000),
 	author: z
 		.object({
-			name: optionalShortText(120),
+			name: optionalNameText(120),
 			email: z
 				.string()
 				.trim()
@@ -126,7 +153,7 @@ export const widgetLoginSchema = z.object({
 });
 
 export const widgetSignupSchema = z.object({
-	name: shortText(120).pipe(z.string().min(1, 'Name is required')),
+	name: nameText(120).pipe(z.string().min(1, 'Name is required')),
 	email: emailSchema,
 	password: passwordSchema,
 	turnstileToken: turnstileTokenSchema

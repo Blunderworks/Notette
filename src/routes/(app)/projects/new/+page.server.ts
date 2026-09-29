@@ -4,7 +4,7 @@ import { config } from '$lib/server/env';
 import { parseProjectForm } from '$lib/server/project-form';
 import { createProject } from '$lib/server/services/projects';
 
-export const load: PageServerLoad = () => ({ emailConfigured: config.emailEnabled });
+export const load: PageServerLoad = () => ({ verificationConfigured: config.verificationEmailEnabled });
 
 export const actions: Actions = {
 	default: async ({ request }) => {

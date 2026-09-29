@@ -1,11 +1,10 @@
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import { setSessionCookie } from '$lib/server/auth/cookies';
-import { verifyPassword } from '$lib/server/auth/password';
+import { verifyUserPassword } from '$lib/server/auth/password';
 import { createSession } from '$lib/server/auth/sessions';
-import { baseUrl } from '$lib/server/base-url';
 import { config } from '$lib/server/env';
-import { clientAddress } from '$lib/server/http';
+import { ACCOUNT_LOGIN_LIMIT, clientAddress, clientNetwork } from '$lib/server/http';
 import { rateLimit } from '$lib/server/rate-limit';
 import { safeRedirectTarget } from '$lib/server/redirect';
 import { resendVerificationEmail } from '$lib/server/services/email-verification';
@@ -36,7 +35,7 @@ export const actions: Actions = {
 		const password = String(form.get('password') ?? '');
 		const redirectTo = safeRedirectTarget(String(form.get('redirect') ?? ''));
 
-		const limit = rateLimit(`login:${clientAddress(event)}`, 10, 15 * 60 * 1000);
+		const limit = rateLimit(`login:${clientNetwork(event)}`, 10, 15 * 60 * 1000);
 		if (!limit.ok) {
 			return loginFailure(429, { email, error: `Too many attempts. Try again in ${Math.ceil(limit.retryAfter / 60)} minutes.` });
 		}
@@ -44,8 +43,11 @@ export const actions: Actions = {
 			return loginFailure(400, { email, error: 'Email and password are required.' });
 		}
 
+		if (!rateLimit(`login-account:${email}`, ACCOUNT_LOGIN_LIMIT.max, ACCOUNT_LOGIN_LIMIT.windowMs).ok) {
+			return loginFailure(429, { email, error: 'Too many attempts for this account. Try again later.' });
+		}
 		const user = await getUserByEmail(email);
-		const valid = user ? await verifyPassword(password, user.passwordHash) : false;
+		const valid = await verifyUserPassword(password, user?.passwordHash);
 		if (!user || !valid) {
 			return loginFailure(400, { email, error: 'Incorrect email or password.' });
 		}
@@ -72,11 +74,13 @@ export const actions: Actions = {
 		const email = String(form.get('email') ?? '')
 			.trim()
 			.toLowerCase();
-		const limit = rateLimit(`verify-resend:${clientAddress(event)}`, 5, 15 * 60 * 1000);
-		if (!limit.ok) return fail(429, { email, error: 'Too many requests. Try again later.' });
-		if (config.emailEnabled && email) {
+		const limit = rateLimit(`verify-resend:${clientNetwork(event)}`, 5, 15 * 60 * 1000);
+		// Per-address cap so the form cannot be used to flood someone's inbox from many networks.
+		const perAddress = rateLimit(`verify-resend-email:${email}`, 3, 60 * 60 * 1000);
+		if (!limit.ok || !perAddress.ok) return fail(429, { email, error: 'Too many requests. Try again later.' });
+		if (config.verificationEmailEnabled && email) {
 			try {
-				await resendVerificationEmail(email, baseUrl(event));
+				await resendVerificationEmail(email);
 			} catch (err) {
 				console.error('[notette] Could not resend verification email', err);
 				return fail(503, { email, error: 'Could not send the email right now. Try again later.' });

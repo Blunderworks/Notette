@@ -9,7 +9,8 @@ import { widgetViewer } from '$lib/server/widget-viewer';
 import type { AuthRequestPollDto } from '$lib/shared/types';
 
 /** How long the widget has to complete the sign-in flow. */
-const AUTH_REQUEST_TTL_MS = 10 * 60 * 1000;
+/** Short on purpose: an approval link that someone else started is a phishing vector. */
+const AUTH_REQUEST_TTL_MS = 5 * 60 * 1000;
 
 export async function createAuthRequest(input: {
 	id: string;

@@ -3,7 +3,7 @@ import type { Actions, PageServerLoad } from './$types';
 import { setSessionCookie } from '$lib/server/auth/cookies';
 import { createSession } from '$lib/server/auth/sessions';
 import { clientAddress } from '$lib/server/http';
-import { countUsers, createUser } from '$lib/server/services/users';
+import { countUsers, createFirstOwner } from '$lib/server/services/users';
 import { emailSchema, passwordSchema } from '$lib/server/validation';
 
 export const load: PageServerLoad = async () => {
@@ -29,7 +29,9 @@ export const actions: Actions = {
 		if (!pw.success) return fail(400, { ...values, error: pw.error.issues[0]?.message ?? 'Invalid password.' });
 		if (password !== confirm) return fail(400, { ...values, error: 'Passwords do not match.' });
 
-		const user = await createUser({ email: email.data, name, password, role: 'owner' });
+		// Atomic: a concurrent submission (for example someone racing the operator) cannot create a second owner.
+		const user = await createFirstOwner({ email: email.data, name, password });
+		if (!user) redirect(303, '/login');
 		const { token, session } = await createSession({
 			userId: user.id,
 			kind: 'dashboard',

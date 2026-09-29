@@ -46,6 +46,11 @@
 		{/if}
 		The access token is stored only in the site's browser storage and can be revoked under Account → Sessions.
 	</p>
+	<div class="notice small">
+		Only approve if you just clicked <strong>Sign in</strong> in the widget on <span class="mono">{data.origin}</span>
+		yourself. If someone sent you this link, deny it: approving would give them
+		{data.user.admin ? 'admin access to this project' : 'access under your name'}.
+	</div>
 	{#if form?.error}<div class="form-error">{form.error}</div>{/if}
 	<div class="form-actions">
 		<form method="POST" action="?/approve" use:enhance>
