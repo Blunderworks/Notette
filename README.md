@@ -111,6 +111,43 @@ Configure Cloudflare Turnstile under **Project settings → Bot protection**. Sa
 
 Turnstile environment variables are no longer used. After upgrading, enter your keys for each project that needs protection; existing projects start with Turnstile disabled. The shared dashboard login keeps its rate limit and does not use project challenges.
 
+### Identity verification
+
+If your app has its own sign-in, it can vouch for its users so feedback shows who sent it. Your server signs a short-lived JSON Web Token (JWT) for the signed-in user and the widget sends it with each request. Notette verifies the token and records the user's ID, name and email with the feedback, marked **verified** in the dashboard. Verified users do not become Notette accounts. They count as signed in when anonymous feedback is off, and they skip bot protection.
+
+Choose a method under **Project settings → Identity verification**:
+
+| Method                   | Your side                                                                                                    | Notette stores                |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------ | ----------------------------- |
+| Shared secret (HS256)    | Sign tokens with the secret Notette generates                                                                | The secret                    |
+| Public key               | Sign with your own private key (RS256/PS256, ES256/ES384/ES512 or EdDSA)                                     | Your public key (PEM)         |
+| Identity provider (JWKS) | Pass the ID token from Auth0, Cognito, Firebase, Supabase or another OpenID Connect provider; no server code | JWKS URL, issuer and audience |
+
+The generated secret is shown once. **Rotate secret** issues a new one while the previous secret keeps working until you select **Revoke previous secret**, so you can deploy the new secret first.
+
+Tokens need `sub` (your user ID, up to 255 characters) and `exp`. `name` and `email` are optional; the standard `given_name`/`family_name`/`preferred_username` claims also work, and an email marked `email_verified: false` is ignored. With a secret or public key, `aud` is optional but must be the project's client key when present. With JWKS, `iss` and `aud` must match the saved values; if your provider's tokens have no `aud`, add one with a custom token template. Keep tokens short-lived, such as 10 minutes; up to 60 seconds of clock difference is accepted.
+
+For example, a Node.js endpoint that only signed-in users can call, using [`jose`](https://github.com/panva/jose):
+
+```js
+import { SignJWT } from "jose";
+
+const key = new TextEncoder().encode(process.env.NOTETTE_IDENTITY_SECRET);
+
+// GET /api/notette-token
+export function notetteToken(user) {
+  return new SignJWT({ name: user.name, email: user.email })
+    .setProtectedHeader({ alg: "HS256" })
+    .setSubject(String(user.id))
+    .setAudience("ntk_yourkey")
+    .setIssuedAt()
+    .setExpirationTime("10m")
+    .sign(key);
+}
+```
+
+Never put the secret or a private key in browser or app code. A rejected token gets a `401` response with code `identity_invalid` and the reason, such as an expired token or a wrong signature. The widgets then fetch a fresh token once; if that also fails, they continue without the user's identity and report the reason (web: browser console; Flutter: `client.identityError`).
+
 ## Clients
 
 ### Web
@@ -162,7 +199,48 @@ For programmatic setup:
 </script>
 ```
 
-`user` prefills anonymous identity; it does not authenticate. Expose build metadata to the client as needed (for example Vercel's `VERCEL_ENV`, `VERCEL_GIT_COMMIT_REF`, `VERCEL_GIT_COMMIT_SHA` and `VERCEL_URL`). `window.Notette` also provides `open()`, `close()`, `comment()`, `list()`, `focus(id)` and `destroy()`.
+`user` prefills anonymous identity; it does not authenticate (use `userToken` below for that). Expose build metadata to the client as needed (for example Vercel's `VERCEL_ENV`, `VERCEL_GIT_COMMIT_REF`, `VERCEL_GIT_COMMIT_SHA` and `VERCEL_URL`). `window.Notette` also provides `open()`, `close()`, `comment()`, `list()`, `focus(id)`, `feedback()`, `identify()` and `destroy()`.
+
+#### Feedback button and signed-in users
+
+To collect feedback from one place, such as a **Send feedback** item in your settings, hide the floating button with `launcher: false` (or `data-launcher="false"`) and call `Notette.feedback()` from your own button. It opens a dialog that sends a message about the current page, with an optional screenshot. `Notette.feedback({ metadata: { source: "settings" } })` adds metadata to that submission. `Notette.open()` still shows the full toolbar when needed.
+
+With [identity verification](#identity-verification) enabled, pass `userToken`: a token or a function that returns a fresh one, or `null` when nobody is signed in. The widget calls the function on load, before the current token expires, and once more if a token is rejected:
+
+```js
+Notette.init({
+  key: "ntk_yourkey",
+  launcher: false,
+  userToken: () =>
+    fetch("/api/notette-token").then((r) => (r.ok ? r.text() : null)),
+});
+document
+  .querySelector("#send-feedback")
+  .addEventListener("click", () => Notette.feedback());
+```
+
+Call `Notette.identify(getToken)` after your user signs in and `Notette.identify(null)` after they sign out. Once a page passes `userToken` (even `null`) or calls `identify()`, the widget no longer offers Notette account sign-in there: your app owns sign-in. On projects that disallow anonymous feedback, signed-out users see a short explanation instead of the form.
+
+#### Custom forms
+
+You can also build your own form and post to the widget API. Requests must come from an allowed origin; browsers send the `Origin` header automatically, and server-side callers must set it themselves.
+
+```js
+await fetch("https://feedback.example.com/api/widget/ntk_yourkey/feedback", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${userToken}`,
+  },
+  body: JSON.stringify({
+    body: "The export button does nothing.",
+    page: { url: location.href, title: document.title },
+    metadata: { plan: "pro" },
+  }),
+});
+```
+
+Only `body` (up to 5,000 characters) and `page.url` are required; `page.url` must be on an allowed origin. Without a token, you may send unverified `author: { name, email }`, and projects with bot protection also require a `turnstileToken`. Projects that disallow anonymous feedback reject requests without a valid token. A `201` response contains the created `item`.
 
 ### Flutter
 
@@ -217,7 +295,9 @@ For native apps, allow `appOrigin` in the project; it is a logical HTTPS origin 
 
 Use a server URL reachable from the device (`localhost` on a phone means that phone). A [complete example](packages/notette_flutter/example/lib/main.dart) is included; copy it into a `flutter create` app, add the dependency and replace the settings.
 
-**Authentication:** existing Notette accounts can sign in; sessions stay in memory and sign-out revokes them. Create accounts through the dashboard or web signup flow. For Turnstile-protected projects, `NotetteFeedback` presents the challenge automatically and manages fresh tokens, errors, cancellation and retries. `turnstileTokenProvider` remains an optional override. Allow the app origin hostname in Cloudflare. Built-in challenges support Android, iOS, macOS, Windows and web; Linux requires the override for protected actions. See the [Flutter setup guide](packages/notette_flutter/README.md#authentication-and-turnstile) for WebView platform requirements. Signed-in submissions skip the challenge. A separate approval integration can set `client.token` to a per-user Notette widget session for this project/origin; never embed an admin token or use your app's own login token. Project and session state refresh before each action.
+**Feedback dialog and signed-in users:** `showNotetteFeedbackDialog(context, client: feedbackClient, screenPath: '/settings')` opens a standalone feedback dialog, for example from your settings screen, without wrapping the app in `NotetteFeedback`. With [identity verification](#identity-verification), pass `userTokenProvider: () => myApi.fetchNotetteToken()` to `NotetteClient`, returning `null` when nobody is signed in. Feedback is then attributed to your user and Notette sign-in is not offered. Call `client.resetIdentity()` after your user signs in or out. See the [Flutter guide](packages/notette_flutter/README.md#feedback-dialog-and-signed-in-users).
+
+**Authentication:** existing Notette accounts can sign in; sessions stay in memory and sign-out revokes them. Create accounts through the dashboard or web signup flow. For Turnstile-protected projects, `NotetteFeedback` presents the challenge automatically and manages fresh tokens, errors, cancellation and retries. `turnstileTokenProvider` remains an optional override. Allow the app origin hostname in Cloudflare. Built-in challenges support Android, iOS, macOS, Windows and web; Linux requires the override for protected actions. See the [Flutter setup guide](packages/notette_flutter/README.md#authentication-and-turnstile) for WebView platform requirements. Signed-in submissions skip the challenge. A separate approval integration can set `client.token` to a per-user Notette widget session for this project/origin; never embed an admin token or put your app's own login token in `client.token` (use `userTokenProvider` instead). Project and session state refresh before each action.
 
 The Flutter widget collects feedback; threads, replies, mentions, signup, element picking and admin triage remain in the web widget/dashboard.
 

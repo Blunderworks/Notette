@@ -32,6 +32,18 @@ export interface CreateFeedbackResponse {
 	uploadToken: string | null;
 }
 
+/** Supplies the bearer credential for each request. */
+export interface ApiAuth {
+	/** A widget session token, a host identity token (`identity: true`), or null for anonymous requests. */
+	credential(): Promise<{ token: string; identity: boolean } | null>;
+	/**
+	 * The server rejected an identity token. Resolves true when a different
+	 * token is now available so the request can be retried once; rejected
+	 * requests never reached a handler, so the retry cannot duplicate a write.
+	 */
+	identityRejected(token: string, message: string): Promise<boolean>;
+}
+
 interface RequestOptions {
 	method?: string;
 	body?: unknown;
@@ -47,15 +59,15 @@ export class ApiClient {
 	constructor(
 		host: string,
 		key: string,
-		private readonly getToken: () => string | null
+		private readonly auth: ApiAuth
 	) {
 		this.base = `${host}/api/widget/${encodeURIComponent(key)}`;
 	}
 
-	private async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+	private async request<T>(path: string, options: RequestOptions = {}, retried = false): Promise<T> {
 		const headers: Record<string, string> = { 'X-Notette-Client': 'widget', ...options.headers };
-		const token = this.getToken();
-		if (token) headers.Authorization = `Bearer ${token}`;
+		const credential = await this.auth.credential();
+		if (credential) headers.Authorization = `Bearer ${credential.token}`;
 		let body: BodyInit | undefined;
 		if (options.rawBody !== undefined) {
 			body = options.rawBody;
@@ -86,6 +98,15 @@ export class ApiClient {
 		const data = (await response.json()) as T | ApiErrorDto;
 		if (!response.ok) {
 			const error = (data as ApiErrorDto)?.error;
+			if (
+				response.status === 401 &&
+				error?.code === 'identity_invalid' &&
+				credential?.identity &&
+				!retried &&
+				(await this.auth.identityRejected(credential.token, error.message))
+			) {
+				return this.request(path, options, true);
+			}
 			throw new NotetteApiError(response.status, error?.message ?? `Request failed (${response.status})`, error?.code);
 		}
 		return data as T;

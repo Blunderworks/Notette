@@ -30,9 +30,10 @@ function compactText(text: string | null | undefined, max = 200): string | null 
  * Renders a feedback item and its context as concise Markdown that a coding
  * agent can act on directly. Used by both the widget and the dashboard.
  */
-function roleSuffix(author: { isAdmin: boolean; isMember?: boolean }): string {
+function roleSuffix(author: { isAdmin: boolean; isMember?: boolean; isVerified?: boolean }): string {
 	if (author.isAdmin) return ' (admin)';
 	if (author.isMember) return ' (member)';
+	if (author.isVerified) return ' (verified app user)';
 	return '';
 }
 

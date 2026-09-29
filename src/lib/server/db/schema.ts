@@ -19,6 +19,8 @@ export const sessionKind = pgEnum('session_kind', ['dashboard', 'widget']);
 export const feedbackStatus = pgEnum('feedback_status', ['open', 'resolved']);
 export const authRequestStatus = pgEnum('auth_request_status', ['pending', 'approved', 'denied']);
 export const notificationKind = pgEnum('notification_kind', ['feedback', 'comment', 'mention']);
+/** How the project verifies identity tokens signed by the host app (see `identity.ts`). */
+export const identityMode = pgEnum('identity_mode', ['off', 'secret', 'public_key', 'jwks']);
 
 const timestamps = {
 	createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -75,6 +77,16 @@ export const projects = pgTable(
 		emailVerificationRequired: boolean('email_verification_required').notNull().default(false),
 		turnstileSiteKey: text('turnstile_site_key'),
 		turnstileSecretKey: text('turnstile_secret_key'),
+		identityMode: identityMode('identity_mode').notNull().default('off'),
+		/** HS256 key for `secret` mode; never serialized after it is first shown. */
+		identitySecret: text('identity_secret'),
+		/** Replaced secret that stays valid until revoked, so host apps can rotate without downtime. */
+		identityPreviousSecret: text('identity_previous_secret'),
+		/** SPKI PEM for `public_key` mode. */
+		identityPublicKey: text('identity_public_key'),
+		identityJwksUrl: text('identity_jwks_url'),
+		identityIssuer: text('identity_issuer'),
+		identityAudience: text('identity_audience'),
 		feedbackSeq: integer('feedback_seq').notNull().default(0),
 		...timestamps
 	},
@@ -154,6 +166,8 @@ export const feedback = pgTable(
 		authorEmail: text('author_email'),
 		/** Set when the author was signed in (admin or member). */
 		userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+		/** Host app user id (`sub`) from a verified identity token; name/email then came from the token. */
+		externalUserId: text('external_user_id'),
 
 		url: text('url').notNull(),
 		path: text('path').notNull(),
@@ -209,6 +223,8 @@ export const comments = pgTable(
 		authorName: text('author_name'),
 		authorEmail: text('author_email'),
 		userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+		/** Host app user id from a verified identity token. */
+		externalUserId: text('external_user_id'),
 		/** Users @-mentioned in the reply. */
 		mentions: jsonb('mentions').$type<MentionRef[]>(),
 		...timestamps

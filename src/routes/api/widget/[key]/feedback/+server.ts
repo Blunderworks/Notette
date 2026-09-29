@@ -2,7 +2,7 @@ import { json } from '@sveltejs/kit';
 import { eq } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { feedback as feedbackTable } from '$lib/server/db/schema';
-import { adminUser, ApiError, api, clientAddress, readJson } from '$lib/server/http';
+import { adminUser, ApiError, api, readJson } from '$lib/server/http';
 import { baseUrl } from '$lib/server/base-url';
 import { randomToken, sha256 } from '$lib/server/ids';
 import { isOriginAllowed, normalizeOrigin } from '$lib/server/origins';
@@ -12,7 +12,7 @@ import { resolveMentions } from '$lib/server/services/mentions';
 import { queueFeedbackNotifications } from '$lib/server/services/notifications';
 import { requireTurnstile } from '$lib/server/turnstile';
 import { feedbackCreateSchema } from '$lib/server/validation';
-import { requireWidgetViewer } from '$lib/server/widget-access';
+import { requireWidgetViewer, widgetWriterKey } from '$lib/server/widget-access';
 import type { FeedbackListDto } from '$lib/shared/types';
 
 export const GET = api(async (event) => {
@@ -54,10 +54,11 @@ export const GET = api(async (event) => {
 export const POST = api(async (event) => {
 	const { project, origin } = event.locals.widget!;
 	const user = requireWidgetViewer(event);
+	const identity = event.locals.identity;
 	const admin = adminUser(event);
 
 	if (!admin) {
-		const limit = rateLimit(`feedback:${project.id}:${user?.id ?? clientAddress(event)}`, 30, 10 * 60 * 1000);
+		const limit = rateLimit(`feedback:${project.id}:${widgetWriterKey(event)}`, 30, 10 * 60 * 1000);
 		if (!limit.ok) {
 			throw new ApiError(429, 'Too many submissions, please try again later', 'rate_limited', {
 				retryAfter: limit.retryAfter
@@ -66,8 +67,8 @@ export const POST = api(async (event) => {
 	}
 
 	const input = await readJson(event.request, feedbackCreateSchema, 200_000);
-	// Bot protection applies to anonymous reviewers only; signed-in users already authenticated.
-	if (!user) await requireTurnstile(event, project, input.turnstileToken);
+	// Bot protection applies to anonymous reviewers only; signed-in and verified app users already authenticated.
+	if (!user && !identity) await requireTurnstile(event, project, input.turnstileToken);
 
 	const pageOrigin = normalizeOrigin(input.page.url);
 	if (!pageOrigin || (pageOrigin !== origin && !isOriginAllowed(pageOrigin, project.allowedOrigins))) {
@@ -78,6 +79,7 @@ export const POST = api(async (event) => {
 	const mentions = await resolveMentions(user, project.id, input.mentions);
 	const created = await createFeedback(project, input, {
 		user,
+		identity,
 		userAgent: event.request.headers.get('user-agent'),
 		mentions
 	});

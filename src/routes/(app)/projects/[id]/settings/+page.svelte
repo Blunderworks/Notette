@@ -3,7 +3,13 @@
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { confirmSubmit } from '$lib/confirm.svelte';
 	import CopyButton from '$lib/components/CopyButton.svelte';
-	import { basicEmbedSnippet, deploymentEmbedSnippet, programmaticEmbedSnippet } from '$lib/embed';
+	import {
+		basicEmbedSnippet,
+		deploymentEmbedSnippet,
+		identityEmbedSnippet,
+		identityTokenSnippet,
+		programmaticEmbedSnippet
+	} from '$lib/embed';
 	import { timeAgo } from '$lib/format';
 
 	let { data, form } = $props();
@@ -34,6 +40,39 @@
 	const withDeployment = $derived(deploymentEmbedSnippet(data.baseUrl, project.clientKey));
 	const programmatic = $derived(programmaticEmbedSnippet(data.baseUrl, project.clientKey));
 	let showAdvanced = $state(false);
+
+	const identity = $derived(data.identity);
+	type IdentityValues = { mode: string; publicKey: string; jwksUrl: string; issuer: string; audience: string };
+	const identityValues: IdentityValues = $derived(
+		form?.action === 'identity' && 'identityValues' in form && form.identityValues
+			? (form.identityValues as IdentityValues)
+			: { mode: identity.mode, publicKey: identity.publicKey, jwksUrl: identity.jwksUrl, issuer: identity.issuer, audience: identity.audience }
+	);
+	let identityModeChoice = $state<string | null>(null);
+	const identityMode = $derived(identityModeChoice ?? identityValues.mode);
+	/** Shown once, right after the action that generated it. */
+	const newIdentitySecret = $derived(form && 'secret' in form && typeof form.secret === 'string' ? form.secret : null);
+	const identityAlgorithm = $derived(identity.mode === 'secret' ? 'HS256' : (identity.publicKeyAlgorithm ?? 'RS256'));
+	const identityServerSnippet = $derived(identityTokenSnippet(project.clientKey, identityAlgorithm));
+	const identityWidgetSnippet = $derived(identityEmbedSnippet(data.baseUrl, project.clientKey, identity.mode === 'jwks'));
+	const identityModes = [
+		{ value: 'off', label: 'Off', help: 'Identity tokens are rejected. Feedback is anonymous or from Notette accounts.' },
+		{
+			value: 'secret',
+			label: 'Shared secret (HS256)',
+			help: 'Notette generates a secret that your server uses to sign tokens. The simplest option.'
+		},
+		{
+			value: 'public_key',
+			label: 'Public key',
+			help: 'Your server signs with its own private key (RS256, ES256 or EdDSA); Notette only stores the public key.'
+		},
+		{
+			value: 'jwks',
+			label: 'Identity provider (JWKS)',
+			help: 'Accept ID tokens from Auth0, Cognito, Firebase, Supabase or another OpenID Connect provider without backend changes.'
+		}
+	];
 
 	// The default enhance resets the form after success, which blanks inputs whose saved values did not change.
 	const keepValues: SubmitFunction = () => async ({ update }) => update({ reset: false });
@@ -317,6 +356,126 @@
 			<label class="row"><input type="checkbox" name="remove" /> Disable Turnstile and remove both keys</label>
 			<button class="btn btn-primary" type="submit">Save bot protection</button>
 		</form>
+	</div>
+
+	<div class="card">
+		<div class="card-header"><h2>Identity verification</h2></div>
+		<div class="card-body stack">
+			<p class="help">
+				Let your app vouch for its signed-in users. Your server signs a short-lived token (JWT) with the user's ID and,
+				optionally, name and email. The widget sends it with each request, and feedback is attributed to that user and
+				marked <em>verified</em>. Verified users count as signed in when anonymous feedback is off and skip bot
+				protection. They do not become Notette accounts.
+			</p>
+			{#if (form?.action === 'identity' || form?.action === 'identitySecret') && form.errors?.length}
+				<div class="form-error">{#each form.errors as error}<div>{error}</div>{/each}</div>
+			{:else if newIdentitySecret}
+				<div class="form-success stack-sm">
+					<strong>Copy the new secret now. It is not shown again.</strong>
+					<div class="row"><code class="inline break">{newIdentitySecret}</code> <CopyButton text={newIdentitySecret} /></div>
+					<span>
+						Store it on your server, for example as <code class="inline">NOTETTE_IDENTITY_SECRET</code>. Never put it in
+						browser or app code.
+					</span>
+				</div>
+			{:else if form?.action === 'identitySecret' && form.success}
+				<div class="form-success">Previous secret revoked. Tokens signed with it are no longer accepted.</div>
+			{:else if form?.action === 'identity' && form.success}
+				<div class="form-success">Identity verification saved.</div>
+			{/if}
+			<form method="POST" action="?/identity" class="stack" use:enhance={keepValues}>
+				<fieldset class="stack-sm">
+					<legend class="label">Verify tokens with</legend>
+					{#each identityModes as option (option.value)}
+						<label class="checkbox">
+							<input
+								type="radio"
+								name="mode"
+								value={option.value}
+								checked={identityMode === option.value}
+								onchange={() => (identityModeChoice = option.value)}
+							/>
+							<span><strong>{option.label}</strong><span class="help" style="display: block">{option.help}</span></span>
+						</label>
+					{/each}
+				</fieldset>
+				{#if identityMode === 'secret'}
+					<p class="help">
+						{identity.mode === 'secret' && identity.secretSet
+							? 'A secret is saved. Rotate it below if it may have leaked.'
+							: 'Saving generates a secret and shows it once.'}
+					</p>
+				{:else if identityMode === 'public_key'}
+					<div class="field">
+						<label class="label" for="identityPublicKey">Public key (PEM)</label>
+						<textarea class="textarea mono" id="identityPublicKey" name="publicKey" rows="6" placeholder="-----BEGIN PUBLIC KEY-----">{identityValues.publicKey}</textarea>
+						<span class="help">
+							RSA (2048 bits or more), EC P-256/P-384/P-521 or Ed25519. Keep the private key on your server.
+							{#if identity.mode === 'public_key' && identity.publicKeyAlgorithm}Tokens must be signed with
+								{identity.publicKeyAlgorithm}{identity.publicKeyAlgorithm.startsWith('RS') ? ' or another RSA algorithm' : ''}.{/if}
+						</span>
+					</div>
+				{:else if identityMode === 'jwks'}
+					<div class="field">
+						<label class="label" for="identityJwksUrl">JWKS URL</label>
+						<input class="input mono" id="identityJwksUrl" name="jwksUrl" value={identityValues.jwksUrl} placeholder="https://your-tenant.example.com/.well-known/jwks.json" autocomplete="off" />
+					</div>
+					<div class="field">
+						<label class="label" for="identityIssuer">Issuer (<code class="inline">iss</code>)</label>
+						<input class="input mono" id="identityIssuer" name="issuer" value={identityValues.issuer} maxlength="500" placeholder="https://your-tenant.example.com/" autocomplete="off" />
+					</div>
+					<div class="field">
+						<label class="label" for="identityAudience">Audience (<code class="inline">aud</code>)</label>
+						<input class="input mono" id="identityAudience" name="audience" value={identityValues.audience} maxlength="500" placeholder="Your app's client ID" autocomplete="off" />
+						<span class="help">
+							Both must match the token exactly. ID tokens usually carry your app's client ID as the audience. If your
+							provider's tokens have no <code class="inline">aud</code> claim, add one with a custom token template.
+						</span>
+					</div>
+				{/if}
+				<button class="btn btn-primary" type="submit" style="align-self: flex-start">Save identity verification</button>
+			</form>
+			{#if identity.mode === 'secret' && identity.secretSet}
+				<div class="row">
+					<form method="POST" action="?/rotateIdentitySecret" use:enhance={confirmSubmit({ title: 'Rotate the identity secret?', message: 'A new secret is generated. The current one keeps working until you revoke it, so you can deploy the new one first.', confirmLabel: 'Rotate secret', danger: false })}>
+						<button class="btn" type="submit">Rotate secret</button>
+					</form>
+					{#if identity.previousSecretSet}
+						<form method="POST" action="?/revokePreviousIdentitySecret" use:enhance={confirmSubmit({ title: 'Revoke the previous secret?', message: 'Tokens signed with it stop working immediately.', confirmLabel: 'Revoke' })}>
+							<button class="btn" type="submit">Revoke previous secret</button>
+						</form>
+						<span class="help">The previous secret is still accepted.</span>
+					{/if}
+				</div>
+			{/if}
+			{#if identity.mode !== 'off'}
+				<div class="stack-sm">
+					{#if identity.mode !== 'jwks'}
+						<h3>Sign tokens on your server</h3>
+						<p class="muted small">
+							Required claims: <code class="inline">sub</code> (your user ID) and <code class="inline">exp</code>.
+							Optional: <code class="inline">name</code>, <code class="inline">email</code> and
+							<code class="inline">aud</code>, which must be this project's client key when present. Keep tokens
+							short-lived and only issue them to the signed-in user.
+						</p>
+						<div class="snippet">
+							<pre>{identityServerSnippet}</pre>
+							<div class="copy"><CopyButton text={identityServerSnippet} /></div>
+						</div>
+					{/if}
+					<h3>Pass tokens to the widget</h3>
+					<p class="muted small">
+						The widget calls <code class="inline">userToken</code> whenever it needs a fresh token. Call
+						<code class="inline">Notette.identify(null)</code> when the user signs out. Custom forms can post to the API
+						directly with the token as a bearer credential.
+					</p>
+					<div class="snippet">
+						<pre>{identityWidgetSnippet}</pre>
+						<div class="copy"><CopyButton text={identityWidgetSnippet} /></div>
+					</div>
+				</div>
+			{/if}
+		</div>
 	</div>
 
 	<div class="card danger">

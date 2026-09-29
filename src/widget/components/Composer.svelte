@@ -109,7 +109,7 @@
 		required
 		disabled={submitting}
 	/>
-	{#if !ui.viewer && !c.config.user?.name}
+	{#if !c.hasAuthor && !c.config.user?.name}
 		<div class="identity">
 			<input class="nt-input" type="text" bind:value={name} placeholder="Your name (optional)" maxlength="120" disabled={submitting} />
 			<input class="nt-input" type="email" bind:value={email} placeholder="Email (optional)" maxlength="254" disabled={submitting} />

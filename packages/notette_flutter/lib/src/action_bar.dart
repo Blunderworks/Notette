@@ -16,6 +16,8 @@ class _FloatingActions extends StatefulWidget {
       required this.browse,
       required this.account,
       required this.viewer,
+      this.identity,
+      this.identityMode = false,
       required this.close});
   final Offset position;
   final ValueChanged<Offset> onMove;
@@ -24,6 +26,10 @@ class _FloatingActions extends StatefulWidget {
   final VoidCallback? activate;
   final VoidCallback comment, cancel, togglePins, browse, account, close;
   final dynamic viewer;
+
+  /// Verified app user; shown instead of Notette sign-in when [identityMode].
+  final dynamic identity;
+  final bool identityMode;
 
   @override
   State<_FloatingActions> createState() => _FloatingActionsState();
@@ -110,17 +116,34 @@ class _FloatingActionsState extends State<_FloatingActions> {
                     label: const Text('List')),
               ],
             ];
-            final accountButton = IconButton(
-                tooltip: widget.viewer == null ? 'Sign in' : 'Account',
-                onPressed: widget.account,
-                style: IconButton.styleFrom(shape: const CircleBorder()),
-                icon: widget.viewer == null
-                    ? const Icon(Icons.person_outline, size: 18)
-                    : CircleAvatar(
-                        radius: 14,
-                        backgroundColor: _soft,
-                        child: Text(_initials(widget.viewer['name']),
-                            style: const TextStyle(fontSize: 11))));
+            final identity = widget.identity;
+            final Widget accountButton = widget.viewer == null &&
+                    widget.identityMode
+                ? identity == null
+                    ? const SizedBox.shrink()
+                    : Tooltip(
+                        message:
+                            'Signed in as ${identity['name'] ?? identity['email'] ?? identity['id']}',
+                        child: Padding(
+                            padding: const EdgeInsets.all(8),
+                            child: CircleAvatar(
+                                radius: 14,
+                                backgroundColor: const Color(0xfff4f5f8),
+                                child: Text(
+                                    _initials(
+                                        identity['name'] ?? identity['email']),
+                                    style: const TextStyle(fontSize: 11)))))
+                : IconButton(
+                    tooltip: widget.viewer == null ? 'Sign in' : 'Account',
+                    onPressed: widget.account,
+                    style: IconButton.styleFrom(shape: const CircleBorder()),
+                    icon: widget.viewer == null
+                        ? const Icon(Icons.person_outline, size: 18)
+                        : CircleAvatar(
+                            radius: 14,
+                            backgroundColor: _soft,
+                            child: Text(_initials(widget.viewer['name']),
+                                style: const TextStyle(fontSize: 11))));
             final closeButton = IconButton(
                 tooltip: 'Close feedback toolbar',
                 onPressed: widget.close,

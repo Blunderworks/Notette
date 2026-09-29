@@ -18,7 +18,7 @@ Base: `src/lib/server/`.
 - `db/index.ts`: lazy DB proxy. Module imports must work without `DATABASE_URL` during build analysis; keep pure helpers DB-free.
 - `db/migrate.ts`, `src/hooks.server.ts`: startup waits for DB, migrates unless `NOTETTE_AUTO_MIGRATE=false`; other failures abort startup.
 - Feedback numbers: increment `projects.feedback_seq` transactionally. Author DTO roles use current `users` left join; deleted users become anonymous.
-- `services/projects.ts` selects all project columns; never serialize raw rows containing `turnstileSecretKey`.
+- `services/projects.ts` selects all project columns; never serialize raw rows containing `turnstileSecretKey`, `identitySecret` or `identityPreviousSecret`.
 - `env.ts`: lazy runtime getters. New env vars also require `.env.example`, `docker-compose.yml`, README configuration table.
 - `base-url.ts`: normalized `NOTETTE_URL`, else request origin. Email requires `SMTP_HOST` + `EMAIL_FROM`. Turnstile uses project DB keys, not env.
 
@@ -27,7 +27,8 @@ Base: `src/lib/server/`.
 Base: `src/lib/server/`; enforcement: `src/hooks.server.ts`.
 - `auth/password.ts`: scrypt; keep `scripts/reset-password.mjs` algorithm synchronized.
 - `auth/sessions.ts`: SHA-256 token storage; dashboard `nts_`, widget `ntw_`; sliding expiry. Dashboard cookie `notette_session`: httpOnly, SameSite=Lax, HTTPS-secure.
-- Widget API accepts bearer sessions bound to project AND origin; ignores cookies. Other routes ignore bearer tokens. Dashboard mutations use SvelteKit CSRF-checked form actions.
+- Widget API accepts bearer sessions bound to project AND origin; ignores cookies. Other routes ignore bearer tokens. Dashboard mutations use SvelteKit CSRF-checked form actions; CSRF is not authorization.
+- `dashboard-access.ts::dashboardAccess(route.id,user)`: sole `(app)` rule: signed in; members only `/(app)` and `/(app)/settings/account`. Form actions skip layout loads, so `src/hooks.server.ts` enforces it for every non-GET `(app)` request (ActionResult JSON for `x-sveltekit-action`, else 303/403); the layout applies it to page views. Owner-only actions still check owner themselves.
 - `shared/roles.ts` under `src/lib`: owner/admin/member; last owner cannot be removed/demoted. Members are reviewers, not admins.
 - `services/members.ts::ensureProjectAccess`: admins pass; members need membership or `openSignups` (insert membership). Recheck every widget request, login, approval and upload access. Revocation invalidates sessions; removing membership deletes project sessions.
 - `widget-access.ts::requireWidgetViewer`: reject anonymous requests when `anonymousFeedbackAllowed=false`; exemptions: config, auth routes.
@@ -37,13 +38,22 @@ Base: `src/lib/server/`; enforcement: `src/hooks.server.ts`.
 - `services/auth-requests.ts`: dashboard approval uses UUID + hashed poll secret. Open popup synchronously before POST; no opener/postMessage dependency. Approval checks access; poll returns widget token once and deletes request. Expired unclaimed approvals revoke sessions.
 - `auth/bootstrap.ts`: never modify existing users. `/setup` only when no users exist.
 
+## Identity verification
+
+Host app vouches for its users with a signed JWT; no Notette account. Base: `src/lib/server/`.
+- `identity.ts::verifyIdentityToken` (jose, DB-free, unit-tested) per `projects.identity_mode`: `secret` HS256 with current then previous secret (rotation); `public_key` SPKI PEM, algorithms pinned by key type (`parsePublicKey` rejects private/<2048-bit RSA); `jwks` remote set cached per URL, issuer+audience required, HTTPS unless localhost. Always require `exp`+`sub`, 60s skew. secret/public_key: `aud` optional but must include client key. `identityFromClaims`: OIDC name fallbacks; drop invalid or `email_verified:false` email.
+- `src/hooks.server.ts`: bearer matching `isIdentityToken` (compact JWS) is verified, else treated as widget session. Rejection answers 401 `identity_invalid` / 503 `identity_unavailable` with CORS before routing; never downgrade to anonymous. `locals.identity` is exclusive with `locals.user`.
+- Identified user = reviewer with trusted author: passes `requireWidgetViewer` sign-in gate, skips Turnstile, no mentions, never a notification recipient, rate-limited as `app:<sub>` (`widget-access.ts::widgetWriterKey`). Name/email from claims (client `author` ignored); `external_user_id` on feedback/comments. Never map claims onto `users` (no email merge).
+- DTOs: `isVerified` on items/comments; `authorExternalId` only with `includeEmail` (dashboard). Config returns `identity`.
+- Settings actions `identity`/`rotateIdentitySecret`/`revokePreviousIdentitySecret` check admin role explicitly. Secrets appear only in the generating action's result, never in loads.
+
 ## Widget API and uploads
 
 Base: `src/routes/api/widget/[key]/`.
 - `src/hooks.server.ts`: resolve key + Origin (Referer fallback), validate allow-list, set `locals.widget={project,origin}`. `origins.ts` supports exact/wildcard origins; origin/key are not authentication.
 - CORS: echo allowed origin, no credentials; errors need CORS too. Add new widget request headers to `src/lib/server/widget-cors.ts`.
 - `config`: public project flags/site key/viewer. Never expose secret key.
-- `feedback`: page scope for reviewers; project scope/admin mutations require admin. Create validates page origin, mentions and identity; returns item + one-time upload token.
+- `feedback`: page scope for reviewers; project scope/admin mutations require admin. Create validates page origin, mentions and identity; returns item + one-time upload token. Custom forms need only `body` + `page.url` (viewport/scroll optional).
 - `feedback/[id]/comments`: visibility/reply/access checks apply before write.
 - `feedback/[id]/screenshot`: PUT raw PNG/JPEG/WebP; sniff magic bytes, enforce size. Authorize with 15-minute `X-Notette-Upload-Token` or admin; members need upload token. GET uses authenticated blob fetch, not image-tag bearer headers.
 - `mentions`: signed-in candidates. `notifications`: signed-in project preference.
@@ -62,19 +72,23 @@ Base: `src/routes/api/widget/[key]/`.
 Base: `src/widget/`.
 - `vite.widget.config.ts`: IIFE `.widget-dist/notette.js`; inline emitted CSS through `__NOTETTE_CSS__`. Build before SvelteKit; `src/routes/notette.js/+server.ts` imports raw bundle, serves ETag/short cache/public CORS.
 - `index.ts`: one `<notette-widget>`, open shadow root, isolated CSS; mounts controller context `notette`; exposes `window.Notette`, dispatches `notette:ready`.
-- `lib/controller.svelte.ts`: sole state/side-effect owner; config, access, auth, compose/upload, threads, confirmations, mentions, notifications. Persist status filter per project; apply to both list and pins. Deep-link focus waits for required sign-in. Write 401 clears token/reopens auth; logout on private project collapses toolbar.
-- `lib/api.ts`: credentials omitted; scoped bearer only. Local storage namespaced `notette:<key>:…`, author under `notette:author`.
+- `lib/controller.svelte.ts`: sole state/side-effect owner; config, access, auth, compose/upload, threads, confirmations, mentions, notifications. Persist status filter per project; apply to both list and pins. Deep-link focus waits for required sign-in. Write 401 clears token/reopens auth (not for `identity_*` codes); logout on private project collapses toolbar.
+- `lib/api.ts`: credentials omitted; one bearer from `ApiAuth.credential()`. Local storage namespaced `notette:<key>:…`, author under `notette:author`.
+- Identity (`userToken` string or getter): replaces the session bearer; getter cached until unverified `exp` minus 30s, concurrent calls share one fetch, `identityGeneration` discards stale fetches/config loads. `identity_invalid` → one retry with a different fresh token (request never reached a handler); then `failIdentity`: continue without identity, `ui.identityError`, console error. `identityManaged` (init passed `userToken` key, even null, or `identify()` called) → no Notette sign-in (`openSignIn` toasts). `hasAuthor` = viewer or identity for sign-in gate/Turnstile/author fields.
+- `launcher: false` / `data-launcher="false"`: no bubble; page items load only once expanded. `Notette.feedback()` → `FeedbackDialog.svelte`: page context only (no click/element), opt-in screenshot captured at submit (host excluded), queued until ready or sign-in; sign-in-only + identity mode without identity shows explanation. Centre dialogs without `transform` (`nt-fade-in` animates it).
 - `lib/dom.ts`: verify generated selectors; locate selector/text → XPath → approximate coordinates. Never capture input values.
 - `lib/isolate.ts`: block widget event bubbling; window capture focus guards stop host focus traps only for widget targets. Install before attaching host; remove on destroy. Host-pointer observers use capture; picker prevents pointerdown focus. Earlier window-capture traps can still win.
 - No global CSS or history/fetch patches. Intercept host events only while picking (including Escape); scroll only on explicit focus. SPA detection: popstate/hashchange, debounced mutations, path polling. Turnstile script is the sole added host-document script exception.
 - `lib/screenshot.ts`: html2canvas-pro; capture at selection time with matching viewport/scroll, before composer/keyboard. Freeze live animated properties into clone; reset canvas transform before click marker. Exclude widget; failure returns null, never blocks submission.
-- Components map: `Launcher`/`AccountMenu` entry/account; `Picker`/`Composer` create; `Pins`/`Thread`/`Panel` browse; `AuthDialog` login/signup/verification/approval; `ConfirmDialog` destructive actions. Shared mention components use CSS variables.
+- Components map: `Launcher`/`AccountMenu` entry/account; `Picker`/`Composer`/`FeedbackDialog` create; `Pins`/`Thread`/`Panel` browse; `AuthDialog` login/signup/verification/approval; `ConfirmDialog` destructive actions. Shared mention components use CSS variables.
 
 ## Flutter widget
 
 Base: `packages/notette_flutter/lib/src/`.
 - Secure storage dependency permits 9.2.4–11.x; use only shared default-constructor/read/write/delete APIs. Host apps own native platform requirements and storage migration across majors.
-- `client.dart`: existing widget API; caller owns client; scoped session defaults to `flutter_secure_storage` (server/project/origin key), memory fallback; `persistSession: false` opts out; 401/logout clears storage. Native uses configured HTTP(S) origin; web uses browser origin. No trusted native identity implied.
+- `client.dart`: existing widget API; caller owns client; scoped session defaults to `flutter_secure_storage` (server/project/origin key), memory fallback; `persistSession: false` opts out; 401/logout clears storage. Native uses configured HTTP(S) origin; web uses browser origin. Origin is no trusted native identity.
+- `client.dart` identity: `userTokenProvider` token replaces session bearer; cached until `exp` minus 30s; one retry on `identity_invalid` with a different token; identity 401s never clear the session; `identity_*` failure sets `identityError` and continues without identity until `resetIdentity()`. Provider set → identity mode: form/overlay hide Notette sign-in, identity counts as author (`config['identity']`), sign-in-only projects show an explanation.
+- `dialog.dart::showNotetteFeedbackDialog`: `_FeedbackForm` in `showDialog` (`centered`, nullable `pin` → no click, no screenshot); no overlay needed; resets a rejected identity per open.
 - `overlay.dart`: `NotetteFeedback` in MaterialApp builder above navigator; own Overlay ancestor for selection/tooltips. Drag stores fractional launcher position, survives routes/forms, resets on remount; safe-area/keyboard bounds with web margins (20px desktop, 12px narrow).
 - `action_bar.dart` (part): shared draggable launcher/toolbar/placement surface, bottom-right anchor expands up/left and clamps each animation frame to safe/keyboard bounds. Width measured with text scaling; overflow switches to Comment/Pins/List rows then account+close. Pill buttons use web colors/comment path. Placement instructions replace toolbar; bar hit testing stays above pin-tap interception.
 - Page URL = origin + current root-relative route. Logical-pixel viewport/screenshot; never synthesize DOM targets. DOM/XPath are not synthesized; `resolvePin` can supply native anchors, otherwise scale click by saved viewport.
@@ -90,8 +104,8 @@ Base: `packages/notette_flutter/lib/src/`.
 ## Dashboard
 
 Base: `src/routes/(app)/`; shared UI: `src/lib/components/`, `src/app.css`.
-- Layout gates members to `/` and `/settings/account`; admins get project navigation. Serialize dates/DTOs explicitly.
-- Project `settings/+page.svelte` card order: Embed, Members, Project settings, Your notifications, Bot protection, Danger zone.
+- Layout applies `dashboardAccess` to page views (members: home + account); admins get project navigation. Serialize dates/DTOs explicitly.
+- Project `settings/+page.svelte` card order: Embed, Members, Project settings, Your notifications, Bot protection, Identity verification, Danger zone.
 - Settings forms that show saved values use `update({ reset: false })` (`keepValues`); default enhance reset blanks inputs whose values did not change. Turnstile form clears only secret/remove.
 - `src/lib/confirm.svelte.ts::confirmSubmit`: synchronously cancel enhance submission, await branded modal, resubmit. Do not use async cancellation or onsubmit preventDefault; enhance can still submit. Native confirm prohibited.
 - `src/lib/server/feedback-bulk.ts::bulkFeedbackAction`: shared list actions; project page must restrict IDs to its project. Confirm deletes, clear selection after success.

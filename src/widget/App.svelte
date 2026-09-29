@@ -4,6 +4,7 @@
 	import AuthDialog from './components/AuthDialog.svelte';
 	import Composer from './components/Composer.svelte';
 	import ConfirmDialog from './components/ConfirmDialog.svelte';
+	import FeedbackDialog from './components/FeedbackDialog.svelte';
 	import Launcher from './components/Launcher.svelte';
 	import Panel from './components/Panel.svelte';
 	import Picker from './components/Picker.svelte';
@@ -32,6 +33,9 @@
 		{/if}
 		{#if ui.panelOpen}
 			<Panel />
+		{/if}
+		{#if ui.feedbackDialog}
+			<FeedbackDialog />
 		{/if}
 		{#if ui.auth.status !== 'idle'}
 			<AuthDialog />

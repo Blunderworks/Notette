@@ -9,7 +9,7 @@
 
 	const openCount = $derived(ui.pageItems.filter((i) => i.status === 'open').length);
 	const initials = $derived(
-		(ui.viewer?.name ?? '')
+		(ui.viewer?.name ?? ui.identity?.name ?? ui.identity?.email ?? '')
 			.split(/\s+/)
 			.filter(Boolean)
 			.slice(0, 2)
@@ -71,7 +71,9 @@
 				>
 					{initials}
 				</button>
-			{:else}
+			{:else if ui.identity}
+				<span class="avatar member static" title="Signed in to this site as {ui.identity.name ?? ui.identity.email ?? ui.identity.id}">{initials}</span>
+			{:else if !c.identityMode}
 				<button class="nt-btn nt-btn-ghost" type="button" onclick={() => c.openSignIn()} title="Sign in with a Notette account">
 					<Icon name="user" />
 					Sign in
@@ -81,7 +83,7 @@
 				<Icon name="close" />
 			</button>
 		</div>
-	{:else}
+	{:else if c.config.launcher}
 		<button class="bubble" type="button" onclick={() => c.expand()} aria-label="Open feedback" title="Feedback">
 			<Icon name="comment" size={22} />
 			{#if openCount > 0 && c.canSeeFeedback}<span class="bubble-count">{openCount}</span>{/if}
@@ -171,6 +173,8 @@
 		margin: 0 2px;
 	}
 	.avatar {
+		display: inline-grid;
+		place-items: center;
 		width: 30px;
 		height: 30px;
 		border-radius: 50%;
@@ -189,6 +193,11 @@
 	}
 	.avatar.member:hover {
 		background: var(--nt-bg-3);
+	}
+	.avatar.static,
+	.avatar.static:hover {
+		background: var(--nt-bg-2);
+		cursor: default;
 	}
 	@media (max-width: 480px) {
 		.launcher {

@@ -38,9 +38,13 @@ export interface DeploymentInfo {
 	[key: string]: string | undefined;
 }
 
-/** Payload the widget sends to create a feedback item. */
+/**
+ * Payload that creates a feedback item: the widget sends all of it; custom
+ * forms need only `body` and `page.url`.
+ */
 export interface FeedbackCreatePayload {
 	body: string;
+	/** Anonymous author details; ignored for signed-in users and verified identities. */
 	author?: {
 		name?: string;
 		email?: string;
@@ -52,11 +56,11 @@ export interface FeedbackCreatePayload {
 	page: {
 		url: string;
 		title?: string;
-		viewportWidth: number;
-		viewportHeight: number;
+		viewportWidth?: number;
+		viewportHeight?: number;
 		devicePixelRatio?: number;
-		scrollX: number;
-		scrollY: number;
+		scrollX?: number;
+		scrollY?: number;
 		userAgent?: string;
 	};
 	/** Click position in page (document) coordinates. */
@@ -86,6 +90,8 @@ export interface CommentDto {
 	isAdmin: boolean;
 	/** Posted by a signed-in member (non-admin account). */
 	isMember: boolean;
+	/** Posted by a host app user whose identity token was verified. */
+	isVerified: boolean;
 	/** Display names of @-mentioned users, for highlighting in the body. */
 	mentions: string[];
 	createdAt: string;
@@ -104,6 +110,8 @@ export interface FeedbackSummaryDto {
 	isAdmin: boolean;
 	/** Posted by a signed-in member (non-admin account). */
 	isMember: boolean;
+	/** Posted by a host app user whose identity token was verified. */
+	isVerified: boolean;
 	createdAt: string;
 	updatedAt: string;
 	resolvedAt: string | null;
@@ -134,7 +142,10 @@ export interface FeedbackDetailDto extends FeedbackSummaryDto {
 	devicePixelRatio: number | null;
 	userAgent: string | null;
 	metadata: Record<string, unknown> | null;
+	/** Dashboard only. */
 	authorEmail?: string | null;
+	/** Dashboard only: the host app's user id for verified authors. */
+	authorExternalId?: string | null;
 }
 
 export interface FeedbackListDto {
@@ -152,6 +163,14 @@ export interface WidgetViewerDto {
 	emailNotifications: boolean;
 }
 
+/** Host app user from a verified identity token (see *Identity verification* in ARCHITECTURE.md). */
+export interface WidgetIdentityDto {
+	/** The token's `sub`. */
+	id: string;
+	name: string | null;
+	email: string | null;
+}
+
 export interface WidgetConfigDto {
 	project: {
 		id: string;
@@ -165,6 +184,8 @@ export interface WidgetConfigDto {
 		openSignups: boolean;
 	};
 	viewer: WidgetViewerDto | null;
+	/** Set when the request carried a valid identity token; mutually exclusive with `viewer`. */
+	identity: WidgetIdentityDto | null;
 	/** Absolute URL of the dashboard, used for "open in dashboard" links. */
 	dashboardUrl: string;
 	/** Cloudflare Turnstile site key when bot protection is configured, otherwise null. */

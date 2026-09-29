@@ -39,6 +39,7 @@
 			</div>
 			<p class="subtitle">
 				{item.authorName ?? 'Anonymous'}{item.isAdmin ? ' (admin)' : item.isMember ? ' (member)' : ''}{item.authorEmail ? ` · ${item.authorEmail}` : ''}
+				{#if item.isVerified}· verified app user <code class="inline">{item.authorExternalId}</code>{/if}
 				· <span title={item.createdAt}>{timeAgo(item.createdAt)}</span>
 				{#if item.resolvedAt}· resolved {timeAgo(item.resolvedAt)}{/if}
 			</p>
@@ -68,7 +69,7 @@
 				<div class="comment root">
 					<div class="comment-head">
 						<span class="author">{item.authorName ?? 'Anonymous'}</span>
-						{#if item.isAdmin}<span class="badge admin">admin</span>{:else if item.isMember}<span class="badge member">member</span>{/if}
+						{#if item.isAdmin}<span class="badge admin">admin</span>{:else if item.isMember}<span class="badge member">member</span>{:else if item.isVerified}<span class="badge verified" title="Identity verified by your app (user ID {item.authorExternalId})">verified</span>{/if}
 						<span title={item.createdAt}>{formatDateTime(item.createdAt)}</span>
 					</div>
 					<div class="comment-body"><MentionText text={item.body} mentions={item.mentions} /></div>
@@ -77,7 +78,7 @@
 					<div class="comment">
 						<div class="comment-head">
 							<span class="author">{comment.authorName ?? 'Anonymous'}</span>
-							{#if comment.isAdmin}<span class="badge admin">admin</span>{:else if comment.isMember}<span class="badge member">member</span>{/if}
+							{#if comment.isAdmin}<span class="badge admin">admin</span>{:else if comment.isMember}<span class="badge member">member</span>{:else if comment.isVerified}<span class="badge verified" title="Identity verified by your app (user ID {comment.externalUserId})">verified</span>{/if}
 							<span title={comment.createdAt}>{formatDateTime(comment.createdAt)}</span>
 							<form method="POST" action="?/deleteComment" style="margin-left: auto" use:enhance={confirmSubmit({ title: 'Delete this reply?', message: 'The reply will be permanently deleted.', confirmLabel: 'Delete' })}>
 								<input type="hidden" name="commentId" value={comment.id} />

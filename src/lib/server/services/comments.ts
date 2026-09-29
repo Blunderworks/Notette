@@ -25,6 +25,8 @@ export async function addComment(input: {
 	authorEmail?: string | null;
 	userId?: string | null;
 	authorRole?: UserRole | null;
+	/** Host app user id from a verified identity token. */
+	externalUserId?: string | null;
 	/** Already validated with `resolveMentions()`. */
 	mentions?: MentionRef[] | null;
 }): Promise<CommentRow> {
@@ -37,6 +39,7 @@ export async function addComment(input: {
 				authorName: input.authorName ?? null,
 				authorEmail: input.authorEmail ?? null,
 				userId: input.userId ?? null,
+				externalUserId: input.externalUserId ?? null,
 				mentions: input.mentions?.length ? input.mentions : null
 			})
 			.returning();
@@ -57,6 +60,7 @@ export function toCommentDto(c: CommentRow): CommentDto {
 		authorName: c.authorName,
 		isAdmin: isAdminRole(c.authorRole),
 		isMember: c.authorRole === 'member',
+		isVerified: c.externalUserId !== null,
 		mentions: (c.mentions ?? []).map((m) => m.name),
 		createdAt: c.createdAt.toISOString()
 	};

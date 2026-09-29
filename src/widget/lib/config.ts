@@ -2,6 +2,13 @@ import type { DeploymentInfo } from '$lib/shared/types';
 
 export type WidgetPosition = 'bottom-right' | 'bottom-left';
 
+/**
+ * Identity token signed by the host app's server for its signed-in user, or a
+ * function returning a fresh one. Null (or a function resolving to null) means
+ * no app user is signed in.
+ */
+export type UserTokenSource = string | null | (() => string | null | undefined | Promise<string | null | undefined>);
+
 /** Options accepted by Notette.init() and the script tag data-* attributes. */
 export interface NotetteInitOptions {
 	/** Project client key (public identifier). */
@@ -10,11 +17,19 @@ export interface NotetteInitOptions {
 	host?: string;
 	deployment?: DeploymentInfo;
 	metadata?: Record<string, unknown>;
-	/** Pre-filled reviewer identity (name/email) when the host app knows the user. */
+	/** Pre-filled reviewer identity (name/email) when the host app knows the user. Not verified. */
 	user?: { name?: string; email?: string };
+	/**
+	 * Verified identity: a token from your server, or a function the widget calls
+	 * whenever it needs a fresh one. Passing the option at all (even null) hands
+	 * sign-in to your app: Notette account sign-in is no longer offered.
+	 */
+	userToken?: UserTokenSource;
 	position?: WidgetPosition;
 	/** Start with the toolbar expanded. */
 	open?: boolean;
+	/** Show the floating feedback button (default true). Without it, use Notette.feedback() or Notette.open(). */
+	launcher?: boolean;
 }
 
 export interface ResolvedConfig {
@@ -23,8 +38,12 @@ export interface ResolvedConfig {
 	deployment: DeploymentInfo | undefined;
 	metadata: Record<string, unknown> | undefined;
 	user: { name?: string; email?: string } | undefined;
+	userToken: UserTokenSource;
+	/** The page passed `userToken` (even null): the host app owns sign-in. */
+	identityManaged: boolean;
 	position: WidgetPosition;
 	open: boolean;
+	launcher: boolean;
 }
 
 export interface ScriptConfig extends Partial<NotetteInitOptions> {
@@ -64,6 +83,7 @@ export function parseScriptConfig(script: HTMLScriptElement | null): ScriptConfi
 		deployment,
 		position: d.position === 'bottom-left' ? 'bottom-left' : d.position === 'bottom-right' ? 'bottom-right' : undefined,
 		open: d.open === 'true',
+		launcher: d.launcher === 'false' ? false : undefined,
 		autoInit: d.autoInit !== 'false',
 		scriptOrigin
 	};
@@ -97,7 +117,10 @@ export function resolveConfig(
 		deployment: cleanDeployment(options?.deployment) ?? script.deployment,
 		metadata: options?.metadata && typeof options.metadata === 'object' ? options.metadata : undefined,
 		user: options?.user,
+		userToken: typeof options?.userToken === 'string' || typeof options?.userToken === 'function' ? options.userToken : null,
+		identityManaged: !!options && 'userToken' in options,
 		position: options?.position ?? script.position ?? 'bottom-right',
-		open: options?.open ?? script.open ?? false
+		open: options?.open ?? script.open ?? false,
+		launcher: options?.launcher ?? script.launcher ?? true
 	};
 }

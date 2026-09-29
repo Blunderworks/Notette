@@ -76,6 +76,36 @@ export async function updateProject(id: string, patch: Partial<ProjectInput>): P
 	return row ?? null;
 }
 
+export type IdentitySettings = Pick<
+	Project,
+	| 'identityMode'
+	| 'identitySecret'
+	| 'identityPreviousSecret'
+	| 'identityPublicKey'
+	| 'identityJwksUrl'
+	| 'identityIssuer'
+	| 'identityAudience'
+>;
+
+export async function updateProjectIdentity(id: string, patch: Partial<IdentitySettings>): Promise<Project | null> {
+	const [row] = await db
+		.update(projects)
+		.set({ ...patch, updatedAt: new Date() })
+		.where(eq(projects.id, id))
+		.returning();
+	return row ?? null;
+}
+
+/** Makes `secret` current while the replaced one keeps verifying tokens until revoked. */
+export async function rotateIdentitySecret(id: string, secret: string): Promise<Project | null> {
+	const [row] = await db
+		.update(projects)
+		.set({ identityPreviousSecret: sql`${projects.identitySecret}`, identitySecret: secret, updatedAt: new Date() })
+		.where(eq(projects.id, id))
+		.returning();
+	return row ?? null;
+}
+
 export async function regenerateClientKey(id: string): Promise<Project | null> {
 	const [row] = await db
 		.update(projects)

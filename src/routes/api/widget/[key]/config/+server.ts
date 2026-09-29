@@ -9,7 +9,7 @@ import type { WidgetConfigDto } from '$lib/shared/types';
 /** Always available, even anonymously, so the widget can learn that it must sign in. */
 export const GET = api(async (event) => {
 	const { project } = event.locals.widget!;
-	const user = event.locals.user;
+	const { user, identity } = event.locals;
 	const dto: WidgetConfigDto = {
 		project: {
 			id: project.id,
@@ -21,6 +21,7 @@ export const GET = api(async (event) => {
 			openSignups: project.openSignups
 		},
 		viewer: user ? await widgetViewer(user, project.id) : null,
+		identity: identity ? { id: identity.id, name: identity.name, email: identity.email } : null,
 		dashboardUrl: baseUrl(event),
 		turnstileSiteKey: turnstileSiteKey(project),
 		emailEnabled: config.emailEnabled

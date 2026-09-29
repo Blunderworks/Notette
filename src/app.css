@@ -473,6 +473,15 @@ img.brand-mark {
 	margin-top: 3px;
 	accent-color: var(--accent);
 }
+fieldset {
+	margin: 0;
+	padding: 0;
+	border: 0;
+	min-width: 0;
+}
+legend {
+	padding: 0;
+}
 .form-actions {
 	display: flex;
 	flex-wrap: wrap;
@@ -551,6 +560,13 @@ img.brand-mark {
 	color: var(--text-2);
 }
 .badge.member::before {
+	display: none;
+}
+.badge.verified {
+	background: var(--success-soft);
+	color: var(--success-text);
+}
+.badge.verified::before {
 	display: none;
 }
 

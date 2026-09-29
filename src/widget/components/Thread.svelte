@@ -215,7 +215,7 @@
 			<div class="message root">
 				<div class="meta">
 					<span class="author">{item.authorName ?? 'Anonymous'}</span>
-					{#if item.isAdmin}<span class="nt-badge nt-badge-admin">admin</span>{:else if item.isMember}<span class="nt-badge nt-badge-member">member</span>{/if}
+					{#if item.isAdmin}<span class="nt-badge nt-badge-admin">admin</span>{:else if item.isMember}<span class="nt-badge nt-badge-member">member</span>{:else if item.isVerified}<span class="nt-badge nt-badge-member">verified</span>{/if}
 					<span class="nt-faint" title={item.createdAt}>{timeAgo(item.createdAt)}</span>
 				</div>
 				<div class="body"><MentionText text={item.body} mentions={item.mentions} /></div>
@@ -235,7 +235,7 @@
 				<div class="message">
 					<div class="meta">
 						<span class="author">{comment.authorName ?? 'Anonymous'}</span>
-						{#if comment.isAdmin}<span class="nt-badge nt-badge-admin">admin</span>{:else if comment.isMember}<span class="nt-badge nt-badge-member">member</span>{/if}
+						{#if comment.isAdmin}<span class="nt-badge nt-badge-admin">admin</span>{:else if comment.isMember}<span class="nt-badge nt-badge-member">member</span>{:else if comment.isVerified}<span class="nt-badge nt-badge-member">verified</span>{/if}
 						<span class="nt-faint" title={comment.createdAt}>{timeAgo(comment.createdAt)}</span>
 					</div>
 					<div class="body"><MentionText text={comment.body} mentions={comment.mentions} /></div>
@@ -259,7 +259,7 @@
 					maxlength={5000}
 					disabled={busy}
 				/>
-				{#if !ui.viewer && !c.config.user?.name}
+				{#if !c.hasAuthor && !c.config.user?.name}
 					<div class="identity">
 						<input class="nt-input" bind:value={name} placeholder="Your name (optional)" maxlength="120" disabled={busy} />
 						<input class="nt-input" type="email" bind:value={email} placeholder="Email (optional)" maxlength="254" disabled={busy} />

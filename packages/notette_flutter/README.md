@@ -75,6 +75,39 @@ For multiple screens, connect `screenPath` to your router's current path or to s
 
 `metadata` must be JSON-encodable and fit the server's 8,000-character limit, with keys of at most 64 characters. Feedback is limited to 5,000 characters. Optional name/email describe anonymous feedback; signed-in authors use their server account identity.
 
+## Feedback dialog and signed-in users
+
+To offer feedback from a single place, such as a **Send feedback** item in your settings screen, show the standalone dialog instead of (or as well as) the overlay. It needs no `NotetteFeedback` wrapper:
+
+```dart
+ListTile(
+  title: const Text('Send feedback'),
+  onTap: () => showNotetteFeedbackDialog(
+    context,
+    client: feedbackClient,
+    screenPath: '/settings',
+    screenTitle: 'Settings',
+    metadata: const {'appVersion': '1.0.0'},
+  ),
+);
+```
+
+The dialog sends the message with the screen's path, size and metadata; it has no pin or screenshot. The project's anonymous-feedback, sign-in and Turnstile rules apply as in the overlay.
+
+If your app has its own sign-in, enable **Identity verification** in the project settings and let your server sign a short-lived token for the signed-in user (see the main Notette README). Pass a provider to the client:
+
+```dart
+final feedbackClient = NotetteClient(
+  serverUrl: Uri.parse('https://feedback.example.com'),
+  projectKey: 'YOUR_PROJECT_CLIENT_KEY',
+  appOrigin: Uri.parse('https://mobile.example.com'),
+  // Fetch from your backend; return null when nobody is signed in.
+  userTokenProvider: () => myApi.fetchNotetteToken(),
+);
+```
+
+The client calls the provider when it needs a token and again shortly before the token's `exp` or after the server rejects it. Feedback is then recorded under your user's ID, name and email and marked verified in the dashboard, without name/email fields or a bot challenge. With a provider set, Notette account sign-in is not offered; on projects that disallow anonymous feedback, the form explains that the user must be signed in to your app. If a token is rejected, `client.identityError` holds the reason and requests continue without identity until `client.resetIdentity()`; call it after your user signs in or out. The dialog resets a rejected identity each time it opens. Never put your identity secret or private key in the app.
+
 ## Screenshots and platform setup
 
 - Screenshots default to on. Placing a pin captures the app subtree with a pin marker before the form appears. **Include screenshot** starts checked; changes are remembered on the device across forms and app restarts (for the current overlay only if storage is unavailable). A preview is shown, and the image is uploaded only when checked and feedback is sent. Set `screenshots: false` to disable capture. The project must also enable screenshots.
@@ -96,7 +129,7 @@ If verification fails, expires or takes too long, choose **Retry verification** 
 
 Built-in presentation supports Android, iOS, macOS, Windows and web. Linux has no bundled WebView implementation; protected actions show an explanatory error unless the optional provider is supplied. Windows needs WebView2 and the WebView plugin's build prerequisites; Apple targets require iOS 12+ / macOS 10.14+. See [native WebView setup](https://inappwebview.dev/docs/intro/) for build requirements. Flutter web loads Cloudflare's script automatically; permit `https://challenges.cloudflare.com` in CSP `script-src` and `frame-src`. No manual script injection or web bridge setup is required.
 
-Apps supplying their own Notette session can set `client.token` to a per-user **widget** session issued for this exact project and origin. Your application's own login token cannot be used. Never ship a shared admin token. Signed-in submissions skip Turnstile, as with the existing web widget. Configuration is refreshed before each action, including expired-session and sign-in requirement changes.
+Apps supplying their own Notette session can set `client.token` to a per-user **widget** session issued for this exact project and origin. Your application's own login token does not belong in `client.token`; use `userTokenProvider` with identity verification instead. Never ship a shared admin token. Signed-in submissions skip Turnstile, as with the existing web widget. Configuration is refreshed before each action, including expired-session and sign-in requirement changes.
 
 ## Available features
 

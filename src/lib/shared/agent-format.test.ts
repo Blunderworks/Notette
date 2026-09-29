@@ -13,11 +13,12 @@ const base: FeedbackDetailDto = {
 	authorName: 'Jane',
 	isAdmin: false,
 	isMember: false,
+	isVerified: false,
 	mentions: [],
 	createdAt: '2026-09-07T10:00:00.000Z',
 	updatedAt: '2026-09-07T10:00:00.000Z',
 	resolvedAt: null,
-	commentCount: 1,
+	commentCount: 2,
 	hasScreenshot: true,
 	viewportWidth: 1440,
 	viewportHeight: 900,
@@ -34,7 +35,8 @@ const base: FeedbackDetailDto = {
 	elementRelY: 0.5,
 	deployment: { environment: 'preview', branch: 'feat/billing', commit: 'abc1234' },
 	comments: [
-		{ id: 'c1', body: 'Reproduced on iPhone 13', authorName: 'Dev', isAdmin: true, isMember: false, mentions: [], createdAt: '2026-09-07T11:00:00.000Z' }
+		{ id: 'c1', body: 'Reproduced on iPhone 13', authorName: 'Dev', isAdmin: true, isMember: false, isVerified: false, mentions: [], createdAt: '2026-09-07T11:00:00.000Z' },
+		{ id: 'c2', body: 'Still broken for me', authorName: 'Sam', isAdmin: false, isMember: false, isVerified: true, mentions: [], createdAt: '2026-09-07T12:00:00.000Z' }
 	],
 	screenshotUrl: 'https://notette.example.com/uploads/u1',
 	elementAttributes: { class: 'primary', type: 'submit' },
@@ -51,6 +53,7 @@ describe('formatFeedbackForAgent', () => {
 		expect(text).toContain('— Jane, 2026-09-07T10:00:00.000Z');
 		expect(text).toContain('## Replies');
 		expect(text).toContain('**Dev (admin)**');
+		expect(text).toContain('**Sam (verified app user)**');
 		expect(text).toContain('- URL: https://preview.example.com/settings?tab=billing');
 		expect(text).toContain('- Viewport: 1440×900 @2x');
 		expect(text).toContain('`<button class="primary" type="submit">`');

@@ -1,10 +1,12 @@
-import type { Handle, HandleServerError, ServerInit } from '@sveltejs/kit';
+import { json, text, type Handle, type HandleServerError, type RequestEvent, type ServerInit } from '@sveltejs/kit';
 import { sequence } from '@sveltejs/kit/hooks';
 import { config } from '$lib/server/env';
 import { runMigrations } from '$lib/server/db/migrate';
 import { ensureBootstrapAdmin } from '$lib/server/auth/bootstrap';
 import { clearSessionCookie, setSessionCookie } from '$lib/server/auth/cookies';
 import { deleteExpiredSessions, invalidateSession, SESSION_COOKIE, validateSession } from '$lib/server/auth/sessions';
+import { dashboardAccess } from '$lib/server/dashboard-access';
+import { isIdentityToken, verifyIdentityToken } from '$lib/server/identity';
 import { getRequestOrigin, isOriginAllowed } from '$lib/server/origins';
 import { ensureProjectAccess } from '$lib/server/services/members';
 import { getProjectByClientKey } from '$lib/server/services/projects';
@@ -52,12 +54,14 @@ export const init: ServerInit = async () => {
 
 /**
  * Widget API: validates the project key and the requesting origin, answers
- * CORS preflights, and authenticates users (admins and members) via bearer
- * tokens only. Cookies are deliberately ignored on these routes.
+ * CORS preflights, and authenticates via bearer credentials only: a widget
+ * session (admins and members) or a host-signed identity token. Cookies are
+ * deliberately ignored on these routes.
  */
 const widgetApi: Handle = async ({ event, resolve }) => {
 	event.locals.user = null;
 	event.locals.session = null;
+	event.locals.identity = null;
 	event.locals.widget = null;
 
 	const { pathname } = event.url;
@@ -92,8 +96,15 @@ const widgetApi: Handle = async ({ event, resolve }) => {
 	event.locals.widget = { project, origin };
 
 	const authorization = event.request.headers.get('authorization');
-	if (authorization?.startsWith('Bearer ')) {
-		const result = await validateSession(authorization.slice(7).trim());
+	const bearer = authorization?.startsWith('Bearer ') ? authorization.slice(7).trim() : '';
+	if (bearer && isIdentityToken(bearer)) {
+		// Unlike stale sessions, a rejected identity token must not silently
+		// downgrade to anonymous feedback: the caller refreshes the token instead.
+		const result = await verifyIdentityToken(project, bearer);
+		if (!result.ok) return applyCors(errorResponse(result.status, result.message, result.code), origin);
+		event.locals.identity = result.identity;
+	} else if (bearer) {
+		const result = await validateSession(bearer);
 		if (
 			result &&
 			result.session.kind === 'widget' &&
@@ -115,7 +126,26 @@ const widgetApi: Handle = async ({ event, resolve }) => {
 	return applyCors(response, origin);
 };
 
-/** Dashboard: cookie sessions plus baseline security headers. */
+const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+/**
+ * Refusal for a dashboard mutation the caller may not perform. Enhanced forms
+ * (`use:enhance`) get an ActionResult as SvelteKit would send; plain form
+ * posts get an HTTP redirect or status.
+ */
+function deniedMutation(event: RequestEvent, access: 'sign_in' | 'forbidden'): Response {
+	const enhanced = event.request.headers.get('x-sveltekit-action') === 'true';
+	if (access === 'sign_in') {
+		const location = `/login?redirect=${encodeURIComponent(event.url.pathname)}`;
+		return enhanced
+			? json({ type: 'redirect', status: 303, location })
+			: new Response(null, { status: 303, headers: { location } });
+	}
+	const message = 'This action requires an admin account';
+	return enhanced ? json({ type: 'error', error: { message } }, { status: 403 }) : text(message, { status: 403 });
+}
+
+/** Dashboard: cookie sessions, the `(app)` access rule for mutations, and baseline security headers. */
 const dashboard: Handle = async ({ event, resolve }) => {
 	if (event.url.pathname.startsWith(WIDGET_API_PREFIX)) return resolve(event);
 
@@ -131,7 +161,10 @@ const dashboard: Handle = async ({ event, resolve }) => {
 		}
 	}
 
-	const response = await resolve(event);
+	// Form actions run without layout loads, so the (app) layout's sign-in and
+	// role gate would not apply to them; enforce the same rule for every mutation.
+	const access = READ_METHODS.has(event.request.method) ? 'allowed' : dashboardAccess(event.route.id, event.locals.user);
+	const response = access === 'allowed' ? await resolve(event) : deniedMutation(event, access);
 	response.headers.set('X-Content-Type-Options', 'nosniff');
 	response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
 	if (!response.headers.has('X-Frame-Options')) response.headers.set('X-Frame-Options', 'DENY');

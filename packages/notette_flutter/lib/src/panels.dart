@@ -92,8 +92,12 @@ class _Card extends StatelessWidget {
       required this.onClose,
       this.actions = const [],
       this.auth = false,
+      this.centered = false,
       this.alignment = Alignment.bottomRight});
   final bool auth;
+
+  /// Standalone dialog: center the card instead of leaving room for the launcher.
+  final bool centered;
   final Alignment alignment;
   final String title;
   final Widget child;
@@ -110,13 +114,14 @@ class _Card extends StatelessWidget {
                     title: title,
                     onClose: onClose,
                     alignment: alignment,
+                    bottomInset: centered ? 12 : 84,
                     child: child,
                     actions: actions))
             : AlertDialog(
                 backgroundColor: Colors.white,
                 surfaceTintColor: Colors.transparent,
                 elevation: 12,
-                alignment: MediaQuery.sizeOf(context).width > 650
+                alignment: !centered && MediaQuery.sizeOf(context).width > 650
                     ? Alignment.centerRight
                     : Alignment.center,
                 shape: RoundedRectangleBorder(
@@ -563,8 +568,15 @@ Widget _message(Map<String, dynamic> message, {bool root = false}) => Container(
               Text('${message['authorName'] ?? 'Anonymous'}',
                   style: const TextStyle(
                       fontWeight: FontWeight.w600, fontSize: 12)),
-              if (message['isAdmin'] == true || message['isMember'] == true)
-                Text(message['isAdmin'] == true ? 'admin' : 'member',
+              if (message['isAdmin'] == true ||
+                  message['isMember'] == true ||
+                  message['isVerified'] == true)
+                Text(
+                    message['isAdmin'] == true
+                        ? 'admin'
+                        : message['isMember'] == true
+                            ? 'member'
+                            : 'verified',
                     style: const TextStyle(color: _accent, fontSize: 11)),
               Text(_age(message['createdAt']),
                   style: const TextStyle(color: _muted, fontSize: 11)),
@@ -801,12 +813,16 @@ class _AuthCard extends StatelessWidget {
       required this.child,
       required this.actions,
       required this.onClose,
-      required this.alignment});
+      required this.alignment,
+      this.bottomInset = 84});
   final String title;
   final Widget child;
   final List<Widget> actions;
   final VoidCallback onClose;
   final Alignment alignment;
+
+  /// Space kept free below the card (the launcher sits there in the overlay).
+  final double bottomInset;
   @override
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
@@ -822,7 +838,7 @@ class _AuthCard extends StatelessWidget {
             : const Duration(milliseconds: 150),
         curve: Curves.easeOut,
         padding: EdgeInsets.fromLTRB(
-            margin, 12, margin, media.viewInsets.bottom + 84),
+            margin, 12, margin, media.viewInsets.bottom + bottomInset),
         child: SafeArea(
             child: Align(
           alignment: alignment,

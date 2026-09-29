@@ -7,12 +7,13 @@ import type {
 	MentionRef,
 	WidgetAuthResultDto,
 	WidgetConfigDto,
+	WidgetIdentityDto,
 	WidgetLoginPayload,
 	WidgetSignupPayload,
 	WidgetViewerDto
 } from '$lib/shared/types';
-import { ApiClient, NotetteApiError } from './api';
-import type { ResolvedConfig } from './config';
+import { ApiClient, NotetteApiError, type ApiAuth } from './api';
+import type { ResolvedConfig, UserTokenSource } from './config';
 import { computeSelector, computeXPath, describeElement, elementLabel, pageRect, pinPosition } from './dom';
 import { captureViewport, currentViewport, type CaptureViewport, type Screenshot } from './screenshot';
 import { readLocal, readSession, writeLocal, writeSession } from './storage';
@@ -66,7 +67,36 @@ export interface AuthorIdentity {
 	email: string;
 }
 
+/** Open feedback dialog (`FeedbackDialog.svelte`), started by `Notette.feedback()`. */
+export interface FeedbackDialogRequest {
+	/** Extra metadata for this submission, merged over the init metadata. */
+	metadata?: Record<string, unknown>;
+}
+
+interface FeedbackInput {
+	body: string;
+	author: AuthorIdentity;
+	screenshot: boolean;
+	turnstileToken?: string | null;
+	mentions?: MentionRef[];
+}
+
 const FOCUS_SESSION_KEY = 'notette:focus';
+/** Identity tokens this close to `exp` are refreshed before use. */
+const TOKEN_REFRESH_MARGIN_MS = 30_000;
+
+/** Unverified `exp` of a JWT in milliseconds (0 when unknown); used only to refresh early. */
+function tokenExpiry(token: string | null): number {
+	try {
+		const segment = token?.split('.')[1];
+		if (!segment) return 0;
+		const json = atob(segment.replace(/-/g, '+').replace(/_/g, '/'));
+		const exp = (JSON.parse(json) as { exp?: unknown }).exp;
+		return typeof exp === 'number' ? exp * 1000 : 0;
+	} catch {
+		return 0;
+	}
+}
 
 function randomId(): string {
 	if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
@@ -99,6 +129,18 @@ export class WidgetController {
 	private toastSeq = 0;
 	private pendingFocusId: string | null = null;
 	private pathCheckHandle: number | null = null;
+	private userTokenSource: UserTokenSource;
+	/** The host app owns sign-in (it passed `userToken` or called `identify()`), even while nobody is signed in. */
+	private identityManaged: boolean;
+	private identityToken: string | null = null;
+	private identityTokenExp = 0;
+	private identityPending: Promise<string | null> | null = null;
+	/** Set once the current token source was rejected; `identify()` clears it. */
+	private identityFailed = false;
+	/** Bumped by `identify()` so stale token fetches and config loads are discarded. */
+	private identityGeneration = 0;
+	/** Dialog requested before the widget was ready or while sign-in was required. */
+	private pendingDialog: FeedbackDialogRequest | null = null;
 
 	ui = $state({
 		ready: false,
@@ -106,6 +148,12 @@ export class WidgetController {
 		project: null as WidgetConfigDto['project'] | null,
 		dashboardUrl: '',
 		viewer: null as WidgetViewerDto | null,
+		/** Host app user from a verified identity token; mutually exclusive with `viewer`. */
+		identity: null as WidgetIdentityDto | null,
+		/** Why the identity token was rejected; feedback then continues without it. */
+		identityError: null as string | null,
+		/** Open feedback dialog, null when closed. */
+		feedbackDialog: null as FeedbackDialogRequest | null,
 		expanded: false,
 		picking: false,
 		pinsVisible: true,
@@ -143,7 +191,9 @@ export class WidgetController {
 		readonly host: HTMLElement
 	) {
 		this.token = readLocal<string | null>(this.storageKey('token'), null);
-		this.api = new ApiClient(config.host, config.key, () => this.token);
+		this.userTokenSource = config.userToken;
+		this.identityManaged = config.identityManaged;
+		this.api = new ApiClient(config.host, config.key, this.apiAuth);
 		this.ui.pinsVisible = readLocal<boolean>(this.storageKey('pins'), true);
 		const storedStatus = readLocal<string>(this.storageKey('status'), 'open');
 		if (storedStatus === 'open' || storedStatus === 'resolved' || storedStatus === 'all') this.ui.statusFilter = storedStatus;
@@ -164,6 +214,11 @@ export class WidgetController {
 		await this.loadConfig();
 		if (this.disposed || this.ui.fatalError) return;
 		this.ui.ready = true;
+		if (this.pendingDialog) {
+			const request = this.pendingDialog;
+			this.pendingDialog = null;
+			this.openFeedbackDialog(request);
+		}
 		await this.loadPageItems();
 		if (this.pendingFocusId) {
 			// Deep links open the widget; on sign-in-only projects that means the sign-in dialog.
@@ -184,30 +239,49 @@ export class WidgetController {
 	}
 
 	private async loadConfig(): Promise<void> {
-		try {
-			const config = await this.api.getConfig();
-			this.ui.project = config.project;
-			this.ui.dashboardUrl = config.dashboardUrl;
-			this.ui.viewer = config.viewer;
-			this.ui.turnstileSiteKey = config.turnstileSiteKey;
-			this.ui.emailEnabled = config.emailEnabled;
-			if (this.token && !config.viewer) {
-				// Token expired or revoked.
-				this.setToken(null);
+		for (let attempt = 0; ; attempt++) {
+			const generation = this.identityGeneration;
+			try {
+				const config = await this.api.getConfig();
+				// identify() switched users while this was in flight; load again for the new one.
+				if (generation !== this.identityGeneration && attempt < 3) continue;
+				this.ui.project = config.project;
+				this.ui.dashboardUrl = config.dashboardUrl;
+				this.ui.viewer = config.viewer;
+				this.ui.identity = config.identity;
+				this.ui.turnstileSiteKey = config.turnstileSiteKey;
+				this.ui.emailEnabled = config.emailEnabled;
+				// An identity token replaces the session on these requests, so only clear a stale session otherwise.
+				if (this.token && !config.viewer && !config.identity) {
+					// Token expired or revoked.
+					this.setToken(null);
+				}
+				if (config.viewer) void this.loadMentionCandidates();
+				return;
+			} catch (err) {
+				if (attempt < 3 && generation !== this.identityGeneration) continue;
+				if (attempt < 3 && err instanceof NotetteApiError && err.code?.startsWith('identity_')) {
+					// Keep the widget usable without the identity rather than disabling it.
+					if (!this.identityFailed) this.failIdentity(err.message);
+					continue;
+				}
+				this.showConfigError(err);
+				return;
 			}
-			if (config.viewer) void this.loadMentionCandidates();
-		} catch (err) {
-			const message =
-				err instanceof NotetteApiError
-					? err.code === 'origin_not_allowed'
-						? `This site's origin is not in the project's allowed origins.`
-						: err.code === 'unknown_project'
-							? 'Unknown project key.'
-							: err.message
-					: 'Could not reach the Notette server.';
-			this.ui.fatalError = message;
-			console.error('[notette] Widget disabled:', message);
 		}
+	}
+
+	private showConfigError(err: unknown): void {
+		const message =
+			err instanceof NotetteApiError
+				? err.code === 'origin_not_allowed'
+					? `This site's origin is not in the project's allowed origins.`
+					: err.code === 'unknown_project'
+						? 'Unknown project key.'
+						: err.message
+				: 'Could not reach the Notette server.';
+		this.ui.fatalError = message;
+		console.error('[notette] Widget disabled:', message);
 	}
 
 	// ---------------------------------------------------------------------
@@ -264,14 +338,24 @@ export class WidgetController {
 		return !!this.ui.viewer;
 	}
 
-	/** The project disallows anonymous use and nobody is signed in yet. */
+	/** A signed-in account or a verified app user: the server knows who is posting. */
+	get hasAuthor(): boolean {
+		return !!this.ui.viewer || !!this.ui.identity;
+	}
+
+	/** The host app provides identity tokens; Notette sign-in is not offered. */
+	get identityMode(): boolean {
+		return this.identityManaged;
+	}
+
+	/** The project disallows anonymous use and nobody is signed in or identified yet. */
 	get requiresSignIn(): boolean {
-		return !!this.ui.project && !this.ui.project.anonymousFeedbackAllowed && !this.ui.viewer;
+		return !!this.ui.project && !this.ui.project.anonymousFeedbackAllowed && !this.hasAuthor;
 	}
 
 	/** Anonymous submissions need a Turnstile token when the server has it configured. */
 	get needsTurnstile(): boolean {
-		return !!this.ui.turnstileSiteKey && !this.ui.viewer;
+		return !!this.ui.turnstileSiteKey && !this.hasAuthor;
 	}
 
 	/** Members count as reviewers: only admins bypass `publicFeedbackVisible`. */
@@ -284,7 +368,8 @@ export class WidgetController {
 	}
 
 	async loadPageItems(): Promise<void> {
-		if (!this.canSeeFeedback) {
+		// Without a launcher, pins only matter once the toolbar is opened programmatically.
+		if (!this.canSeeFeedback || (!this.config.launcher && !this.ui.expanded)) {
 			this.ui.pageItems = [];
 			return;
 		}
@@ -355,7 +440,9 @@ export class WidgetController {
 			this.openSignIn();
 			return;
 		}
+		const load = !this.config.launcher && !this.ui.expanded;
 		this.ui.expanded = true;
+		if (load) void this.loadPageItems();
 	}
 
 	collapse(): void {
@@ -474,6 +561,29 @@ export class WidgetController {
 		this.ui.composer = null;
 	}
 
+	/** Opens the standalone feedback dialog (no element picking). */
+	openFeedbackDialog(request: FeedbackDialogRequest = {}): void {
+		if (!this.ui.ready) {
+			this.pendingDialog = request;
+			return;
+		}
+		// With host identity the dialog itself explains why feedback is unavailable.
+		if (this.requiresSignIn && !this.identityMode) {
+			this.pendingDialog = request;
+			this.openSignIn();
+			return;
+		}
+		this.ui.picking = false;
+		this.ui.composer = null;
+		this.ui.panelOpen = false;
+		this.closeThread();
+		this.ui.feedbackDialog = request;
+	}
+
+	closeFeedbackDialog(): void {
+		this.ui.feedbackDialog = null;
+	}
+
 	// ---------------------------------------------------------------------
 	// Author identity for reviewers
 	// ---------------------------------------------------------------------
@@ -494,27 +604,27 @@ export class WidgetController {
 	// Feedback actions
 	// ---------------------------------------------------------------------
 
-	async submitFeedback(input: {
-		target: ComposerTarget;
-		body: string;
-		author: AuthorIdentity;
-		screenshot: boolean;
-		turnstileToken?: string | null;
-		mentions?: MentionRef[];
-	}): Promise<FeedbackDetailDto> {
-		const { target } = input;
-		const element = target.element;
-		const payload: FeedbackCreatePayload = {
+	/** Author, bot-protection and mention fields shared by both feedback entry points. */
+	private authorPayload(input: FeedbackInput): Pick<FeedbackCreatePayload, 'body' | 'author' | 'turnstileToken' | 'mentions'> {
+		return {
 			body: input.body.trim(),
-			// Signed-in users (admins and members) post under their account; the server ignores author for them.
-			author: this.isSignedIn
+			// Signed-in users and verified app users post under their identity; the server ignores author for them.
+			author: this.hasAuthor
 				? undefined
 				: {
 						name: input.author.name.trim() || undefined,
 						email: input.author.email.trim() || undefined
 					},
-			turnstileToken: this.isSignedIn ? undefined : (input.turnstileToken ?? undefined),
-			mentions: this.isSignedIn && input.mentions?.length ? input.mentions.map((m) => m.id) : undefined,
+			turnstileToken: this.hasAuthor ? undefined : (input.turnstileToken ?? undefined),
+			mentions: this.isSignedIn && input.mentions?.length ? input.mentions.map((m) => m.id) : undefined
+		};
+	}
+
+	async submitFeedback(input: FeedbackInput & { target: ComposerTarget }): Promise<FeedbackDetailDto> {
+		const { target } = input;
+		const element = target.element;
+		const payload: FeedbackCreatePayload = {
+			...this.authorPayload(input),
 			page: {
 				url: location.href,
 				title: document.title || undefined,
@@ -543,7 +653,7 @@ export class WidgetController {
 			};
 		}
 
-		if (!this.isSignedIn) this.rememberAuthor(input.author);
+		if (!this.hasAuthor) this.rememberAuthor(input.author);
 
 		// The screenshot was started when the reviewer clicked; a missing one
 		// (composer opened before screenshots were enabled) is taken now instead.
@@ -553,7 +663,42 @@ export class WidgetController {
 			? await (target.screenshot ??
 					captureViewport({ exclude: this.host, marker: { x: target.pageX, y: target.pageY }, viewport: target.view }))
 			: null;
+		return this.sendFeedback(payload, wantScreenshot, shot, () => (this.ui.composer = null));
+	}
 
+	/** Sends the dialog's feedback: page context only, optionally with a screenshot taken now. */
+	async submitDialogFeedback(input: FeedbackInput): Promise<FeedbackDetailDto> {
+		const request = this.ui.feedbackDialog ?? {};
+		const view = currentViewport();
+		const metadata = { ...this.config.metadata, ...request.metadata };
+		const payload: FeedbackCreatePayload = {
+			...this.authorPayload(input),
+			page: {
+				url: location.href,
+				title: document.title || undefined,
+				viewportWidth: view.width,
+				viewportHeight: view.height,
+				devicePixelRatio: window.devicePixelRatio || 1,
+				scrollX: view.scrollX,
+				scrollY: view.scrollY,
+				userAgent: navigator.userAgent
+			},
+			deployment: this.config.deployment,
+			metadata: Object.keys(metadata).length ? metadata : undefined
+		};
+		if (!this.hasAuthor) this.rememberAuthor(input.author);
+		// The dialog lives in the excluded widget host, so the page is captured as the user sees it.
+		const wantScreenshot = input.screenshot && !!this.ui.project?.screenshotsEnabled;
+		const shot = wantScreenshot ? await captureViewport({ exclude: this.host, viewport: view }) : null;
+		return this.sendFeedback(payload, wantScreenshot, shot, () => (this.ui.feedbackDialog = null));
+	}
+
+	private async sendFeedback(
+		payload: FeedbackCreatePayload,
+		wantScreenshot: boolean,
+		shot: Screenshot | null,
+		onCreated: () => void
+	): Promise<FeedbackDetailDto> {
 		let created: Awaited<ReturnType<ApiClient['create']>>;
 		try {
 			created = await this.api.create(payload);
@@ -561,7 +706,7 @@ export class WidgetController {
 			this.handleAuthError(err);
 			throw err;
 		}
-		this.ui.composer = null;
+		onCreated();
 		this.upsertPageItem(created.item);
 
 		if (wantScreenshot) {
@@ -621,15 +766,15 @@ export class WidgetController {
 			comment = await this.api.addComment(
 				id,
 				body.trim(),
-				this.isSignedIn ? undefined : { name: author.name.trim() || undefined, email: author.email.trim() || undefined },
-				this.isSignedIn ? undefined : (turnstileToken ?? undefined),
+				this.hasAuthor ? undefined : { name: author.name.trim() || undefined, email: author.email.trim() || undefined },
+				this.hasAuthor ? undefined : (turnstileToken ?? undefined),
 				this.isSignedIn && mentions?.length ? mentions.map((m) => m.id) : undefined
 			);
 		} catch (err) {
 			this.handleAuthError(err);
 			throw err;
 		}
-		if (!this.isSignedIn) this.rememberAuthor(author);
+		if (!this.hasAuthor) this.rememberAuthor(author);
 		if (this.ui.detail?.id === id) {
 			this.ui.detail.comments = [...this.ui.detail.comments, comment];
 			this.ui.detail.commentCount = this.ui.detail.comments.length;
@@ -764,9 +909,93 @@ export class WidgetController {
 		writeLocal(this.storageKey('token'), token);
 	}
 
+	/** Bearer credential per request: the host identity token when available, else the session. */
+	private readonly apiAuth: ApiAuth = {
+		credential: async () => {
+			const identity = await this.currentIdentityToken();
+			if (identity) return { token: identity, identity: true };
+			return this.token ? { token: this.token, identity: false } : null;
+		},
+		identityRejected: async (token, message) => {
+			// A token function can usually supply a fresh token (the old one expired).
+			if (typeof this.userTokenSource === 'function') {
+				const fresh = await this.currentIdentityToken(true);
+				if (fresh && fresh !== token) return true;
+				if (!fresh) {
+					// The app reports nobody signed in any more.
+					this.ui.identity = null;
+					return false;
+				}
+			}
+			this.failIdentity(message);
+			return false;
+		}
+	};
+
+	private async currentIdentityToken(refresh = false): Promise<string | null> {
+		const source = this.userTokenSource;
+		if (!source || this.identityFailed) return null;
+		if (typeof source === 'string') return source;
+		const fresh = this.identityTokenExp === 0 || this.identityTokenExp - Date.now() > TOKEN_REFRESH_MARGIN_MS;
+		if (!refresh && this.identityToken && fresh) return this.identityToken;
+		if (!this.identityPending) {
+			const generation = this.identityGeneration;
+			const pending = (async () => {
+				try {
+					const value = await source();
+					return typeof value === 'string' && value.trim() ? value.trim() : null;
+				} catch (err) {
+					console.error('[notette] userToken() failed', err);
+					return null;
+				}
+			})();
+			this.identityPending = pending;
+			void pending.then((token) => {
+				if (this.identityPending === pending) this.identityPending = null;
+				if (generation !== this.identityGeneration) return;
+				this.identityToken = token;
+				this.identityTokenExp = tokenExpiry(token);
+			});
+		}
+		return this.identityPending;
+	}
+
+	private failIdentity(message: string): void {
+		this.identityFailed = true;
+		this.identityToken = null;
+		this.ui.identity = null;
+		this.ui.identityError = message;
+		console.error(`[notette] Identity token rejected: ${message}. Feedback continues without the app user's identity.`);
+	}
+
+	/**
+	 * Switches the host identity (`Notette.identify()`): a token, a token
+	 * function, or null after the app user signs out. Reloads config and pins.
+	 */
+	async identify(source: UserTokenSource): Promise<void> {
+		this.userTokenSource = typeof source === 'string' || typeof source === 'function' ? source : null;
+		this.identityManaged = true;
+		this.identityGeneration += 1;
+		this.identityToken = null;
+		this.identityTokenExp = 0;
+		this.identityPending = null;
+		this.identityFailed = false;
+		this.ui.identity = null;
+		this.ui.identityError = null;
+		// Before start() finishes, its config load notices the new generation and reloads.
+		if (!this.ui.ready || this.disposed) return;
+		await this.loadConfig();
+		await this.loadPageItems();
+	}
+
 	/** Shows the inline sign-in (or sign-up) dialog. */
 	openSignIn(mode: AuthMode = 'login'): void {
 		if (this.ui.auth.status === 'waiting') return;
+		if (this.identityMode) {
+			// The host app owns sign-in; Notette accounts are not offered on this page.
+			this.toast(this.ui.identityError ? `Could not verify your account: ${this.ui.identityError}` : 'Sign in to this site to send feedback', 'error');
+			return;
+		}
 		this.authAbort?.abort();
 		this.authAbort = null;
 		const signupAllowed = !!this.ui.project?.openSignups;
@@ -810,7 +1039,14 @@ export class WidgetController {
 		this.ui.viewer = result.viewer;
 		this.ui.auth = { status: 'idle', mode: 'login', url: '', message: '' };
 		this.toast(message, 'success');
-		this.ui.expanded = true;
+		if (this.pendingDialog) {
+			// Sign-in was only needed to open the dialog; do not also open the toolbar.
+			const request = this.pendingDialog;
+			this.pendingDialog = null;
+			this.openFeedbackDialog(request);
+		} else {
+			this.ui.expanded = true;
+		}
 		await this.loadPageItems();
 		void this.loadMentionCandidates();
 		this.applyPendingFocus();
@@ -822,7 +1058,8 @@ export class WidgetController {
 	 */
 	private handleAuthError(err: unknown): void {
 		if (!(err instanceof NotetteApiError)) return;
-		if (err.status !== 401) return;
+		// Identity token failures are handled by `apiAuth`; the session is not involved.
+		if (err.status !== 401 || err.code?.startsWith('identity_')) return;
 		if (this.token) this.setToken(null);
 		this.ui.viewer = null;
 		this.ui.mentionCandidates = [];
@@ -897,6 +1134,7 @@ export class WidgetController {
 	cancelSignIn(): void {
 		this.authAbort?.abort();
 		this.authAbort = null;
+		this.pendingDialog = null;
 		this.ui.auth = { status: 'idle', mode: 'login', url: '', message: '' };
 	}
 

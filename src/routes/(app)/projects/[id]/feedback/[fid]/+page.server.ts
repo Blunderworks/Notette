@@ -30,6 +30,8 @@ export const load: PageServerLoad = async (event) => {
 			authorEmail: c.authorEmail,
 			isAdmin: isAdminRole(c.authorRole),
 			isMember: c.authorRole === 'member',
+			isVerified: c.externalUserId !== null,
+			externalUserId: c.externalUserId,
 			mentions: (c.mentions ?? []).map((m) => m.name),
 			createdAt: c.createdAt.toISOString()
 		})),

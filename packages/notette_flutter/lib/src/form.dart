@@ -4,6 +4,7 @@ class _FeedbackForm extends StatefulWidget {
   const _FeedbackForm(
       {super.key,
       this.authOnly = false,
+      this.centered = false,
       this.alignment = Alignment.bottomRight,
       this.detailId,
       this.user = const {},
@@ -21,6 +22,9 @@ class _FeedbackForm extends StatefulWidget {
       required this.tokenProvider,
       required this.onClose});
   final bool authOnly;
+
+  /// Standalone dialog (no overlay launcher): center the card.
+  final bool centered;
   final Alignment alignment;
   final String? detailId;
   final Map<String, String> user, deployment;
@@ -31,7 +35,9 @@ class _FeedbackForm extends StatefulWidget {
   final Map<String, dynamic> page;
   final Map<String, Object?> metadata;
   final Uint8List? png;
-  final Offset pin;
+
+  /// Placed pin; null for the standalone dialog, which sends no click.
+  final Offset? pin;
   final bool includeScreenshot;
   final ValueChanged<bool> onScreenshotChanged;
   final Future<String> Function(String)? tokenProvider;
@@ -79,8 +85,18 @@ class _FeedbackFormState extends State<_FeedbackForm> {
   Completer<String?>? _verification;
   Widget? _challengeView;
   bool get _signedIn => _config?['viewer'] != null;
+
+  /// A verified app user from the client's identity token.
+  bool get _identified => _config?['identity'] != null;
+
+  /// The app supplies identity tokens; Notette sign-in is not offered.
+  bool get _identityMode => widget.client.userTokenProvider != null;
   bool get _requiresLogin =>
-      _config?['project']['anonymousFeedbackAllowed'] == false && !_signedIn;
+      _config?['project']['anonymousFeedbackAllowed'] == false &&
+      !_signedIn &&
+      !_identified;
+  String get _sender =>
+      '${_config?['viewer']?['name'] ?? _config?['identity']?['name'] ?? _config?['identity']?['email'] ?? 'Reviewer'}';
 
   @override
   void initState() {
@@ -117,7 +133,7 @@ class _FeedbackFormState extends State<_FeedbackForm> {
       if (mounted)
         setState(() {
           _error = '$e';
-          if (e is NotetteException && e.status == 401) {
+          if (e is NotetteException && e.status == 401 && !_identityMode) {
             _signIn = true;
             _config?['viewer'] = null;
             _candidates = [];
@@ -151,7 +167,9 @@ class _FeedbackFormState extends State<_FeedbackForm> {
   Future<void> _refreshConfig() async {
     final config = await widget.client.config();
     if (!mounted) throw const NotetteException('Verification cancelled.');
-    if (config['viewer'] == null && widget.client.token != null) {
+    if (config['viewer'] == null &&
+        config['identity'] == null &&
+        widget.client.token != null) {
       widget.client.token = null;
       await widget.client.saveSession();
     }
@@ -200,8 +218,9 @@ class _FeedbackFormState extends State<_FeedbackForm> {
         throw const NotetteException(
             'Please sign in to send your feedback. Your draft has been kept.');
       }
-      final token =
-          anonymousOnly && _signedIn ? null : await _challenge(action);
+      final token = anonymousOnly && (_signedIn || _identified)
+          ? null
+          : await _challenge(action);
       if (!mounted) throw const NotetteException('Verification cancelled.');
       try {
         return await send(token);
@@ -437,10 +456,11 @@ class _FeedbackFormState extends State<_FeedbackForm> {
             (token) => widget.client.createFeedback({
                   'body': _body.text.trim(),
                   'page': widget.page,
-                  'click': {
-                    'x': widget.pin.dx.round(),
-                    'y': widget.pin.dy.round()
-                  },
+                  if (widget.pin != null)
+                    'click': {
+                      'x': widget.pin!.dx.round(),
+                      'y': widget.pin!.dy.round()
+                    },
                   if (widget.deployment.isNotEmpty)
                     'deployment': widget.deployment,
                   if (_signedIn) 'mentions': _mentions,
@@ -472,7 +492,9 @@ class _FeedbackFormState extends State<_FeedbackForm> {
 
   @override
   Widget build(BuildContext context) {
-    final login = _requiresLogin || _signIn;
+    final login = (_requiresLogin || _signIn) && !_identityMode;
+    // The app owns sign-in but could not identify the user on a sign-in-only project.
+    final unavailable = _requiresLogin && _identityMode;
     final thread = widget.detailId != null;
     final title = _success != null
         ? 'Thank you'
@@ -517,7 +539,8 @@ class _FeedbackFormState extends State<_FeedbackForm> {
         child: _Card(
             title: title,
             auth: login || _verifyEmail != null || _approvalStatus != null,
-            alignment: widget.alignment,
+            alignment: widget.centered ? Alignment.center : widget.alignment,
+            centered: widget.centered,
             onClose: widget.onClose,
             child: _Resize(
                 child: Column(
@@ -571,7 +594,13 @@ class _FeedbackFormState extends State<_FeedbackForm> {
                         onPressed: _cancelApproval,
                         child: const Text('Back to sign in')),
                   ] else if (_config != null) ...[
-                    if (login) ...[
+                    if (unavailable)
+                      Text(
+                          widget.client.identityError != null
+                              ? 'We could not verify your account, so feedback is unavailable right now. Try again later.'
+                              : 'Sign in to this app to send feedback.',
+                          style: const TextStyle(color: _muted))
+                    else if (login) ...[
                       if (_requiresLogin)
                         const Padding(
                             padding: EdgeInsets.only(bottom: 10),
@@ -777,7 +806,15 @@ class _FeedbackFormState extends State<_FeedbackForm> {
                                 child: Text('Type @ to mention someone',
                                     style: TextStyle(
                                         fontSize: 11, color: _muted))),
-                          if (!_signedIn) ...[
+                          if (!_signedIn && !_identified) ...[
+                            if (widget.client.identityError != null)
+                              const Padding(
+                                  padding: EdgeInsets.only(bottom: 8),
+                                  child: Text(
+                                      'We could not verify your account, so this feedback is sent without your details.',
+                                      style: TextStyle(
+                                          fontSize: 12,
+                                          color: Color(0xff92400e)))),
                             _Field('Name (optional)',
                                 controller: _name,
                                 enabled: !_busy,
@@ -787,16 +824,16 @@ class _FeedbackFormState extends State<_FeedbackForm> {
                                 enabled: !_busy,
                                 maxLength: 254,
                                 keyboardType: TextInputType.emailAddress),
-                            TextButton(
-                                onPressed: _busy
-                                    ? null
-                                    : () => setState(() => _signIn = true),
-                                child: const Text('Sign in')),
+                            if (!_identityMode)
+                              TextButton(
+                                  onPressed: _busy
+                                      ? null
+                                      : () => setState(() => _signIn = true),
+                                  child: const Text('Sign in')),
                           ] else
                             Padding(
                                 padding: const EdgeInsets.only(bottom: 12),
-                                child: Text(
-                                    'Posting as ${_config?['viewer']?['name'] ?? 'Reviewer'}',
+                                child: Text('Posting as $_sender',
                                     style: const TextStyle(
                                         color: _muted, fontSize: 12))),
                           if (!thread &&
@@ -855,6 +892,7 @@ class _FeedbackFormState extends State<_FeedbackForm> {
                             }),
                     child: const Text('Back')),
               if (!login &&
+                  !unavailable &&
                   _success == null &&
                   _verifyEmail == null &&
                   _approvalStatus == null &&

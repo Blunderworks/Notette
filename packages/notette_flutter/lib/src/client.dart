@@ -25,6 +25,7 @@ class NotetteClient {
     this.token,
     this.persistSession = true,
     this.timeout = const Duration(seconds: 30),
+    this.userTokenProvider,
   })  : _http = httpClient ?? http.Client(),
         _ownsHttp = httpClient == null {
     for (final uri in [serverUrl, appOrigin]) {
@@ -86,18 +87,118 @@ class NotetteClient {
   /// A scoped widget session. Never embed an admin token.
   String? token;
 
+  /// Returns an identity token that your server signed for the app's
+  /// signed-in user, or null when nobody is signed in. Called whenever a
+  /// token is needed; one is reused until shortly before its `exp`. While a
+  /// token is available it replaces the Notette session and sign-in.
+  final Future<String?> Function()? userTokenProvider;
+
+  String? _userToken;
+  DateTime? _userTokenExpiry;
+  Future<String?>? _userTokenPending;
+  int _identityGeneration = 0;
+  String? _identityError;
+
+  /// Why the server rejected the last identity token. Requests continue
+  /// without identity until [resetIdentity] is called.
+  String? get identityError => _identityError;
+
+  /// Forgets the cached identity token and any rejection. Call it after your
+  /// app's user signs in or out.
+  void resetIdentity() {
+    _identityGeneration++;
+    _userToken = null;
+    _userTokenExpiry = null;
+    _userTokenPending = null;
+    _identityError = null;
+  }
+
+  static DateTime? _tokenExpiry(String? token) {
+    try {
+      final parts = token?.split('.');
+      if (parts == null || parts.length != 3) return null;
+      final claims = jsonDecode(
+          utf8.decode(base64Url.decode(base64Url.normalize(parts[1]))));
+      final exp = claims is Map ? claims['exp'] : null;
+      return exp is num
+          ? DateTime.fromMillisecondsSinceEpoch((exp * 1000).round())
+          : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<String?> _identityToken({bool refresh = false}) {
+    final provider = userTokenProvider;
+    if (provider == null || _identityError != null) return Future.value(null);
+    final cached = _userToken;
+    final expiry = _userTokenExpiry;
+    if (!refresh &&
+        cached != null &&
+        (expiry == null ||
+            expiry.difference(DateTime.now()) > const Duration(seconds: 30))) {
+      return Future.value(cached);
+    }
+    return _userTokenPending ??= () async {
+      final generation = _identityGeneration;
+      try {
+        final value = (await provider())?.trim();
+        final result = value == null || value.isEmpty ? null : value;
+        if (generation == _identityGeneration) {
+          _userToken = result;
+          _userTokenExpiry = _tokenExpiry(result);
+        }
+        return result;
+      } catch (_) {
+        return null;
+      } finally {
+        if (generation == _identityGeneration) _userTokenPending = null;
+      }
+    }();
+  }
+
+  /// The identity token when available, otherwise the widget session.
+  Future<({String token, bool identity})?> _credential() async {
+    final identity = await _identityToken();
+    if (identity != null) return (token: identity, identity: true);
+    final session = token;
+    return session == null ? null : (token: session, identity: false);
+  }
+
+  /// Handles a 401. Returns true when a fresh identity token warrants one
+  /// retry; rejected requests never reached a handler, so nothing is resent twice.
+  Future<bool> _unauthorized(({String token, bool identity})? credential,
+      String? code, String message, bool retried) async {
+    if (credential?.identity != true) {
+      token = null;
+      await saveSession();
+      return false;
+    }
+    if (code == 'identity_invalid' && !retried) {
+      final fresh = await _identityToken(refresh: true);
+      if (fresh != null && fresh != credential!.token) return true;
+    }
+    if (code?.startsWith('identity_') == true) {
+      _identityError = message;
+      _userToken = null;
+    }
+    return false;
+  }
+
   Future<Map<String, dynamic>> _request(
     String path, {
     String method = 'GET',
     Map<String, dynamic>? body,
     Uint8List? bytes,
     Map<String, String> headers = const {},
+    bool retried = false,
   }) async {
+    final credential = await _credential();
     final request = http.Request(method, Uri.parse('$_base$path'));
     request.headers.addAll({
       'X-Notette-Client': 'flutter',
       if (!kIsWeb) 'Origin': origin,
-      if (token != null) 'Authorization': 'Bearer $token',
+      if (credential != null) 'Authorization': 'Bearer ${credential.token}',
       ...headers,
     });
     if (bytes != null) {
@@ -120,18 +221,27 @@ class NotetteClient {
             status: response.statusCode);
       }
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        if (response.statusCode == 401) {
-          token = null;
-          await saveSession();
-        }
         final error = data['error'];
-        throw NotetteException(
-          error is Map
-              ? (error['message'] as String? ?? 'Request failed.')
-              : 'Request failed.',
-          status: response.statusCode,
-          code: error is Map ? error['code'] as String? : null,
-        );
+        final message = error is Map
+            ? (error['message'] as String? ?? 'Request failed.')
+            : 'Request failed.';
+        final code = error is Map ? error['code'] as String? : null;
+        if (response.statusCode == 401 &&
+            await _unauthorized(credential, code, message, retried)) {
+          return await _request(path,
+              method: method,
+              body: body,
+              bytes: bytes,
+              headers: headers,
+              retried: true);
+        }
+        if (response.statusCode == 503 &&
+            credential?.identity == true &&
+            code == 'identity_unavailable') {
+          _identityError = message;
+        }
+        throw NotetteException(message,
+            status: response.statusCode, code: code);
       }
       return data;
     } on TimeoutException {
@@ -232,18 +342,19 @@ class NotetteClient {
           method: 'POST', body: {'pollSecret': secret});
 
   Future<Uint8List> screenshot(String id) async {
+    final credential = await _credential();
     final request = http.Request('GET',
         Uri.parse('$_base/feedback/${Uri.encodeComponent(id)}/screenshot'));
     request.headers.addAll({
       'X-Notette-Client': 'flutter',
       if (!kIsWeb) 'Origin': origin,
-      if (token != null) 'Authorization': 'Bearer $token',
+      if (credential != null) 'Authorization': 'Bearer ${credential.token}',
     });
     try {
       final response = await (() async =>
               http.Response.fromStream(await _http.send(request)))()
           .timeout(timeout);
-      if (response.statusCode == 401) {
+      if (response.statusCode == 401 && credential?.identity != true) {
         token = null;
         await saveSession();
       }

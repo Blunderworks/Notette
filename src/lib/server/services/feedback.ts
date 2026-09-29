@@ -11,6 +11,7 @@ import {
 	type Upload,
 	type User
 } from '$lib/server/db/schema';
+import type { VerifiedIdentity } from '$lib/server/identity';
 import type { FeedbackCreateInput } from '$lib/server/validation';
 import { isAdminRole, type UserRole } from '$lib/shared/roles';
 import type { FeedbackDetailDto, FeedbackStatus, FeedbackSummaryDto, MentionRef } from '$lib/shared/types';
@@ -47,6 +48,7 @@ function selectColumns() {
 		authorName: feedback.authorName,
 		authorEmail: feedback.authorEmail,
 		userId: feedback.userId,
+		externalUserId: feedback.externalUserId,
 		url: feedback.url,
 		path: feedback.path,
 		pageTitle: feedback.pageTitle,
@@ -156,13 +158,21 @@ export async function getFeedbackThread(id: string): Promise<FeedbackThread | nu
 export async function createFeedback(
 	project: Project,
 	input: FeedbackCreateInput,
-	ctx: { user?: User | null; userAgent?: string | null; mentions?: MentionRef[] | null }
+	ctx: {
+		user?: User | null;
+		identity?: VerifiedIdentity | null;
+		userAgent?: string | null;
+		mentions?: MentionRef[] | null;
+	}
 ): Promise<Feedback> {
 	const pageUrl = new URL(input.page.url);
-	// Signed-in users (admins and members) always post under their account identity.
+	// Signed-in users post under their account and verified app users under their
+	// token's claims; only anonymous reviewers supply their own name and email.
 	const author = ctx.user
-		? { name: ctx.user.name, email: ctx.user.email, userId: ctx.user.id }
-		: { name: input.author?.name ?? null, email: input.author?.email ?? null, userId: null };
+		? { name: ctx.user.name, email: ctx.user.email, userId: ctx.user.id, externalUserId: null }
+		: ctx.identity
+			? { name: ctx.identity.name, email: ctx.identity.email, userId: null, externalUserId: ctx.identity.id }
+			: { name: input.author?.name ?? null, email: input.author?.email ?? null, userId: null, externalUserId: null };
 
 	return db.transaction(async (tx) => {
 		const [seq] = await tx
@@ -181,14 +191,15 @@ export async function createFeedback(
 				authorName: author.name,
 				authorEmail: author.email,
 				userId: author.userId,
+				externalUserId: author.externalUserId,
 				url: pageUrl.toString(),
 				path: pageUrl.pathname,
 				pageTitle: input.page.title ?? null,
-				viewportWidth: input.page.viewportWidth,
-				viewportHeight: input.page.viewportHeight,
+				viewportWidth: input.page.viewportWidth ?? null,
+				viewportHeight: input.page.viewportHeight ?? null,
 				devicePixelRatio: input.page.devicePixelRatio ?? null,
-				scrollX: input.page.scrollX,
-				scrollY: input.page.scrollY,
+				scrollX: input.page.scrollX ?? null,
+				scrollY: input.page.scrollY ?? null,
 				clickX: input.click?.x ?? null,
 				clickY: input.click?.y ?? null,
 				elementSelector: input.element?.selector ?? null,
@@ -275,6 +286,7 @@ export function toSummaryDto(row: FeedbackRow): FeedbackSummaryDto {
 		authorName: row.authorName,
 		isAdmin: isAdminRole(row.authorRole),
 		isMember: row.authorRole === 'member',
+		isVerified: row.externalUserId !== null,
 		createdAt: row.createdAt.toISOString(),
 		updatedAt: row.updatedAt.toISOString(),
 		resolvedAt: row.resolvedAt ? row.resolvedAt.toISOString() : null,
@@ -316,6 +328,9 @@ export function toDetailDto(
 		userAgent: thread.item.userAgent,
 		metadata: thread.item.metadata
 	};
-	if (opts.includeEmail) dto.authorEmail = thread.item.authorEmail;
+	if (opts.includeEmail) {
+		dto.authorEmail = thread.item.authorEmail;
+		dto.authorExternalId = thread.item.externalUserId;
+	}
 	return dto;
 }

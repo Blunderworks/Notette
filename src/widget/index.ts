@@ -6,7 +6,7 @@
 import { mount, unmount } from 'svelte';
 import './widget.css';
 import App from './App.svelte';
-import { parseScriptConfig, resolveConfig, type NotetteInitOptions } from './lib/config';
+import { parseScriptConfig, resolveConfig, type NotetteInitOptions, type UserTokenSource } from './lib/config';
 import { WidgetController } from './lib/controller.svelte';
 import { isolateHostEvents } from './lib/isolate';
 
@@ -83,6 +83,18 @@ const api = {
 	/** Enters element-picking mode. */
 	comment(): void {
 		instance?.controller.startPicking();
+	},
+	/** Opens the feedback dialog: a message about the current page, no element picking. */
+	feedback(options?: { metadata?: Record<string, unknown> }): void {
+		const metadata = options?.metadata && typeof options.metadata === 'object' ? options.metadata : undefined;
+		instance?.controller.openFeedbackDialog({ metadata });
+	},
+	/**
+	 * Sets the app user's identity token (or a function returning fresh ones)
+	 * after sign-in, or clears it with null after sign-out.
+	 */
+	identify(userToken: UserTokenSource): Promise<void> {
+		return instance?.controller.identify(userToken) ?? Promise.resolve();
 	},
 	/** Opens the feedback list panel. */
 	list(): void {

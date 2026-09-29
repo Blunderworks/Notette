@@ -60,11 +60,12 @@ export const feedbackCreateSchema = z.object({
 	page: z.object({
 		url: z.string().trim().url().max(2048),
 		title: optionalShortText(300),
-		viewportWidth: finiteInt.pipe(z.number().min(0).max(100_000)),
-		viewportHeight: finiteInt.pipe(z.number().min(0).max(100_000)),
+		// Optional so custom forms can post without layout details.
+		viewportWidth: finiteInt.pipe(z.number().min(0).max(100_000)).optional(),
+		viewportHeight: finiteInt.pipe(z.number().min(0).max(100_000)).optional(),
 		devicePixelRatio: z.number().finite().min(0).max(10).optional(),
-		scrollX: finiteInt.pipe(z.number().min(-1_000_000).max(1_000_000)),
-		scrollY: finiteInt.pipe(z.number().min(-1_000_000).max(1_000_000)),
+		scrollX: finiteInt.pipe(z.number().min(-1_000_000).max(1_000_000)).optional(),
+		scrollY: finiteInt.pipe(z.number().min(-1_000_000).max(1_000_000)).optional(),
 		userAgent: optionalShortText(500)
 	}),
 	click: z

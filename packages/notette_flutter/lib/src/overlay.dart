@@ -16,6 +16,7 @@ import 'turnstile.dart';
 part 'panels.dart';
 part 'form.dart';
 part 'action_bar.dart';
+part 'dialog.dart';
 
 /// Place in MaterialApp.builder to keep feedback available across routes.
 class NotetteFeedback extends StatefulWidget {
@@ -95,11 +96,17 @@ class _NotetteFeedbackState extends State<NotetteFeedback> {
   String? _pendingFocus;
   bool _ready = false;
   bool get _admin => _config?['viewer']?['admin'] == true;
+
+  /// A Notette account or a verified app user (identity token).
+  bool get _hasAuthor =>
+      _config?['viewer'] != null || _config?['identity'] != null;
+  bool get _identityMode => widget.client.userTokenProvider != null;
+  bool get _requiresLogin =>
+      _config?['project']?['anonymousFeedbackAllowed'] == false && !_hasAuthor;
   bool get _canSee =>
       _admin ||
       (_config?['project']?['publicFeedbackVisible'] == true &&
-          (_config?['project']?['anonymousFeedbackAllowed'] != false ||
-              _config?['viewer'] != null));
+          !_requiresLogin);
 
   @override
   void initState() {
@@ -163,7 +170,8 @@ class _NotetteFeedbackState extends State<NotetteFeedback> {
     try {
       await _expand();
       if (!mounted || !widget.enabled) return;
-      if (_config != null && _config!['viewer'] == null) {
+      // With app identity the form explains itself; Notette sign-in is not offered.
+      if (_config != null && !_hasAuthor && !_identityMode) {
         setState(() => _expanded = false);
         _showForm(authOnly: true);
       }
@@ -194,8 +202,7 @@ class _NotetteFeedbackState extends State<NotetteFeedback> {
     }
     await _reload();
     if (mounted && _pendingFocus != null) {
-      if (_config?['viewer'] == null &&
-          _config?['project']?['anonymousFeedbackAllowed'] == false) {
+      if (_requiresLogin) {
         _showForm(authOnly: true);
       } else {
         final id = _pendingFocus!;
@@ -211,7 +218,9 @@ class _NotetteFeedbackState extends State<NotetteFeedback> {
       final path = widget.screenPath();
       final config = await widget.client.config();
       if (!mounted || generation != _loadGeneration) return;
-      if (config['viewer'] == null && widget.client.token != null) {
+      if (config['viewer'] == null &&
+          config['identity'] == null &&
+          widget.client.token != null) {
         widget.client.token = null;
         await widget.client.saveSession();
       }
@@ -284,8 +293,7 @@ class _NotetteFeedbackState extends State<NotetteFeedback> {
       await _expand();
       return;
     }
-    if (_config?['project']?['anonymousFeedbackAllowed'] == false &&
-        _config?['viewer'] == null) {
+    if (_requiresLogin) {
       _pendingFocus = id;
       _showForm(authOnly: true);
       return;
@@ -333,6 +341,7 @@ class _NotetteFeedbackState extends State<NotetteFeedback> {
   }
 
   void _account() {
+    if (_config?['viewer'] == null && _identityMode) return;
     if (_config?['viewer'] == null) {
       _showForm(authOnly: true);
       return;
@@ -622,6 +631,8 @@ class _NotetteFeedbackState extends State<NotetteFeedback> {
                           browse: _browse,
                           account: _account,
                           viewer: _config?['viewer'],
+                          identity: _config?['identity'],
+                          identityMode: _identityMode,
                           close: _collapse,
                         )),
                   if (_opening) const ModalBarrier(dismissible: false),
