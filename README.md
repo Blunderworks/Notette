@@ -203,7 +203,7 @@ For programmatic setup:
 
 #### Feedback button and signed-in users
 
-To collect feedback from one place, such as a **Send feedback** item in your settings, hide the floating button with `launcher: false` (or `data-launcher="false"`) and call `Notette.feedback()` from your own button. It opens a dialog that sends a message about the current page, with an optional screenshot. `Notette.feedback({ metadata: { source: "settings" } })` adds metadata to that submission. `Notette.open()` still shows the full toolbar when needed.
+To collect feedback from one place, such as a **Send feedback** item in your settings, hide the floating button with `launcher: false` (or `data-launcher="false"`) and call `Notette.feedback()` from your own button. It opens a dialog that sends a message about the current page; when the project allows screenshots, users can attach an image (PNG, JPEG or WebP, up to `NOTETTE_MAX_SCREENSHOT_BYTES`) with **+ Attach screenshot**. `Notette.feedback({ metadata: { source: "settings" } })` adds metadata to that submission. `Notette.open()` still shows the full toolbar when needed.
 
 With [identity verification](#identity-verification) enabled, pass `userToken`: a token or a function that returns a fresh one, or `null` when nobody is signed in. The widget calls the function on load, before the current token expires, and once more if a token is rejected:
 

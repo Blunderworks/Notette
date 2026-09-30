@@ -14,10 +14,10 @@
 	let body = $state('');
 	let name = $state(author.name);
 	let email = $state(author.email);
-	// Opt-in here: the dialog is usually opened from a settings screen, not the problem itself.
-	let includeScreenshot = $state(false);
+	// A chosen image rather than a capture: the dialog is usually opened from a settings screen, not the problem itself.
+	let attachment = $state<File | null>(null);
+	let fileInput = $state<HTMLInputElement | null>(null);
 	let submitting = $state(false);
-	let stage = $state<'idle' | 'capturing' | 'sending'>('idle');
 	let error = $state<string | null>(null);
 	let input = $state<MentionTextarea | null>(null);
 	let closeButton = $state<HTMLButtonElement | null>(null);
@@ -39,6 +39,33 @@
 		else closeButton?.focus();
 	});
 
+	const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+	/** Server default, for servers that predate `maxScreenshotBytes` in the config. */
+	const DEFAULT_MAX_BYTES = 8 * 1024 * 1024;
+
+	function pickAttachment(event: Event) {
+		const target = event.currentTarget as HTMLInputElement;
+		const file = target.files?.[0] ?? null;
+		target.value = '';
+		if (!file) return;
+		if (!IMAGE_TYPES.includes(file.type)) {
+			error = 'Choose a PNG, JPEG or WebP image.';
+			return;
+		}
+		const maxBytes = ui.project?.maxScreenshotBytes ?? DEFAULT_MAX_BYTES;
+		if (file.size > maxBytes) {
+			error = `Choose an image under ${formatSize(maxBytes)}.`;
+			return;
+		}
+		error = null;
+		attachment = file;
+	}
+
+	function formatSize(bytes: number): string {
+		if (bytes < 1024 * 1024) return `${Math.max(1, Math.floor(bytes / 1024))} KB`;
+		return `${Number((bytes / (1024 * 1024)).toFixed(1))} MB`;
+	}
+
 	function close() {
 		if (!submitting) c.closeFeedbackDialog();
 	}
@@ -48,16 +75,14 @@
 		if (!canSend) return;
 		submitting = true;
 		error = null;
-		stage = includeScreenshot && ui.project?.screenshotsEnabled ? 'capturing' : 'sending';
 		try {
-			await c.submitDialogFeedback({ body, author: { name, email }, screenshot: includeScreenshot, turnstileToken, mentions });
+			await c.submitDialogFeedback({ body, author: { name, email }, attachment, turnstileToken, mentions });
 		} catch (err) {
 			error = err instanceof NotetteApiError ? err.message : 'Could not send feedback. Please try again.';
 			// The token was consumed by the failed attempt; request a new one.
 			turnstile?.reset();
 		} finally {
 			submitting = false;
-			stage = 'idle';
 		}
 	}
 
@@ -126,18 +151,39 @@
 			{#if error}<div class="nt-error">{error}</div>{/if}
 			<div class="foot">
 				{#if ui.project?.screenshotsEnabled}
-					<label class="check">
-						<input type="checkbox" bind:checked={includeScreenshot} disabled={submitting} />
-						<Icon name="image" size={14} />
-						Include screenshot
-					</label>
+					<input
+						class="nt-sr-only"
+						type="file"
+						accept={IMAGE_TYPES.join(',')}
+						tabindex="-1"
+						aria-hidden="true"
+						bind:this={fileInput}
+						onchange={pickAttachment}
+					/>
+					{#if attachment}
+						<span class="attachment nt-small">
+							<Icon name="image" size={14} />
+							<span class="filename" title={attachment.name}>{attachment.name}</span>
+							<button
+								class="nt-icon-btn clear"
+								type="button"
+								onclick={() => (attachment = null)}
+								disabled={submitting}
+								aria-label="Remove screenshot"
+							>
+								<Icon name="close" size={12} />
+							</button>
+						</span>
+					{:else}
+						<button class="attach" type="button" onclick={() => fileInput?.click()} disabled={submitting}>+ Attach screenshot</button>
+					{/if}
 				{:else}
 					<span></span>
 				{/if}
 				<span class="actions">
 					<button class="nt-btn nt-btn-ghost" type="button" onclick={close} disabled={submitting}>Cancel</button>
 					<button class="nt-btn nt-btn-primary" type="submit" disabled={!canSend}>
-						{#if stage === 'capturing'}Capturing…{:else if stage === 'sending'}Sending…{:else if waitingForToken}Verifying…{:else}Send{/if}
+						{#if submitting}Sending…{:else if waitingForToken}Verifying…{:else}Send{/if}
 					</button>
 				</span>
 			</div>
@@ -202,17 +248,41 @@
 		gap: 8px;
 		flex-wrap: wrap;
 	}
-	.check {
-		display: inline-flex;
-		align-items: center;
-		gap: 5px;
-		color: var(--nt-text-2);
+	.attach {
+		padding: 0;
+		border: 0;
+		background: none;
+		color: var(--nt-accent);
+		font: inherit;
 		font-size: 12px;
 		cursor: pointer;
 	}
-	.check input {
-		accent-color: var(--nt-accent);
-		margin: 0;
+	.attach:hover:not(:disabled) {
+		text-decoration: underline;
+	}
+	.attach:disabled {
+		opacity: 0.6;
+		cursor: default;
+	}
+	.attachment {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		min-width: 0;
+		max-width: 100%;
+		color: var(--nt-text-2);
+	}
+	.filename {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		max-width: 180px;
+	}
+	.clear {
+		flex: none;
+		width: 22px;
+		height: 22px;
+		padding: 0;
 	}
 	.actions {
 		display: inline-flex;

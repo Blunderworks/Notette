@@ -143,7 +143,8 @@ export class ApiClient {
 	): Promise<{ id: string }> {
 		const headers: Record<string, string> = { 'Content-Type': blob.type || 'image/jpeg' };
 		if (uploadToken) headers['X-Notette-Upload-Token'] = uploadToken;
-		return this.request(`/feedback/${encodeURIComponent(id)}/screenshot?w=${size.width}&h=${size.height}`, {
+		const query = size.width && size.height ? `?w=${size.width}&h=${size.height}` : '';
+		return this.request(`/feedback/${encodeURIComponent(id)}/screenshot${query}`, {
 			method: 'PUT',
 			rawBody: blob,
 			headers

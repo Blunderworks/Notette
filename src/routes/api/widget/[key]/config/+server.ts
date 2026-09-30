@@ -17,6 +17,7 @@ export const GET = api(async (event) => {
 			publicFeedbackVisible: project.publicFeedbackVisible,
 			reviewerRepliesEnabled: project.reviewerRepliesEnabled,
 			screenshotsEnabled: project.screenshotsEnabled,
+			maxScreenshotBytes: config.maxScreenshotBytes,
 			anonymousFeedbackAllowed: project.anonymousFeedbackAllowed,
 			openSignups: project.openSignups
 		},

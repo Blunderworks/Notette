@@ -92,7 +92,7 @@ ListTile(
 );
 ```
 
-The dialog sends the message with the screen's path, size and metadata; it has no pin or screenshot. The project's anonymous-feedback, sign-in and Turnstile rules apply as in the overlay.
+The dialog sends the message with the screen's path, size and metadata; it has no pin and captures no screenshot. When the project allows screenshots, users can choose an image (PNG, JPEG or WebP, within the server's screenshot size limit) from their gallery or files with **+ Attach screenshot**. The project's anonymous-feedback, sign-in and Turnstile rules apply as in the overlay.
 
 If your app has its own sign-in, enable **Identity verification** in the project settings and let your server sign a short-lived token for the signed-in user (see the main Notette README). Pass a provider to the client:
 
@@ -113,8 +113,8 @@ The client calls the provider when it needs a token and again shortly before the
 - Screenshots default to on. Placing a pin captures the app subtree with a pin marker before the form appears. **Include screenshot** starts checked; changes are remembered on the device across forms and app restarts (for the current overlay only if storage is unavailable). A preview is shown, and the image is uploaded only when checked and feedback is sent. Set `screenshots: false` to disable capture. The project must also enable screenshots.
 - Flutter platform views, WebViews, video textures and some web renderers may not appear in the image. Capture failures leave text feedback available. Server upload limits still apply. If upload fails after feedback is saved, the UI says so and prevents resubmitting the saved feedback.
 - Android: ensure `android/app/src/main/AndroidManifest.xml` includes `<uses-permission android:name="android.permission.INTERNET" />` outside `<application>` for release builds.
-- macOS sandboxed builds: add `<key>com.apple.security.network.client</key><true/>` to both DebugProfile and Release entitlements.
-- iOS: use HTTPS to work with App Transport Security. Screenshots use Flutter rendering and need no photo-library permission. Windows/Linux use normal network access.
+- macOS sandboxed builds: add `<key>com.apple.security.network.client</key><true/>` to both DebugProfile and Release entitlements, plus `<key>com.apple.security.files.user-selected.read-only</key><true/>` if you use `showNotetteFeedbackDialog`.
+- iOS: use HTTPS to work with App Transport Security. Overlay screenshots use Flutter rendering and need no photo-library permission; if you use `showNotetteFeedbackDialog`, add `NSPhotoLibraryUsageDescription` to `Info.plist` for **+ Attach screenshot**. Windows/Linux use normal network access.
 - Web: allow the browser origin in Notette, use HTTPS to avoid mixed-content blocking, and permit your Notette host in the application's CSP `connect-src`.
 
 ## Authentication and Turnstile

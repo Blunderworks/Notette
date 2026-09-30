@@ -5,7 +5,8 @@ part of 'overlay.dart';
 /// completes when the dialog closes.
 ///
 /// [screenPath] is the current root-relative route, such as `/settings`. The
-/// dialog sends no pin or screenshot. With [NotetteClient.userTokenProvider],
+/// dialog sends no pin or capture; when the project allows screenshots, the
+/// user can attach a PNG, JPEG or WebP image instead. With [NotetteClient.userTokenProvider],
 /// feedback is attributed to your signed-in user; otherwise the project's
 /// anonymous and sign-in rules apply as in the overlay.
 Future<void> showNotetteFeedbackDialog(
@@ -54,6 +55,7 @@ Future<void> showNotetteFeedbackDialog(
         pin: null,
         includeScreenshot: false,
         onScreenshotChanged: (_) {},
+        pickImage: () => ImagePicker().pickImage(source: ImageSource.gallery),
         tokenProvider: turnstileTokenProvider,
         openUrl: openUrl,
         onChanged: () {},

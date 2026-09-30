@@ -11,6 +11,7 @@ class _FeedbackForm extends StatefulWidget {
       this.deployment = const {},
       this.openUrl,
       this.onNavigate,
+      this.pickImage,
       required this.onChanged,
       required this.client,
       required this.page,
@@ -40,6 +41,9 @@ class _FeedbackForm extends StatefulWidget {
   final Offset? pin;
   final bool includeScreenshot;
   final ValueChanged<bool> onScreenshotChanged;
+
+  /// Standalone dialog: lets the user attach an image instead of a capture.
+  final Future<XFile?> Function()? pickImage;
   final Future<String> Function(String)? tokenProvider;
   final VoidCallback onClose;
   @override
@@ -63,6 +67,8 @@ class _FeedbackFormState extends State<_FeedbackForm> {
   String? _notice;
   Map<String, dynamic>? _detail;
   Uint8List? _shot;
+  String? _pickedName;
+  Uint8List? _pickedBytes;
   String? _shotError;
   bool _shotExpanded = false;
   bool _deleteConfirm = false;
@@ -422,6 +428,30 @@ class _FeedbackFormState extends State<_FeedbackForm> {
         widget.onClose();
       });
 
+  Future<void> _pickImage() => _run(() async {
+        final file = await widget.pickImage!();
+        if (file == null) return;
+        // Server default, for servers that predate `maxScreenshotBytes` in the config.
+        final maxBytes =
+            (_config?['project']?['maxScreenshotBytes'] as num?)?.toInt() ??
+                8 * 1024 * 1024;
+        // Checked before reading so a huge file is never loaded into memory.
+        if (await file.length() > maxBytes)
+          throw NotetteException(
+              'Choose an image under ${_fileSize(maxBytes)}.');
+        final bytes = await file.readAsBytes();
+        if (bytes.length > maxBytes)
+          throw NotetteException(
+              'Choose an image under ${_fileSize(maxBytes)}.');
+        if (_imageType(bytes) == null)
+          throw const NotetteException('Choose a PNG, JPEG or WebP image.');
+        if (!mounted) return;
+        setState(() {
+          _pickedName = file.name.isEmpty ? 'Screenshot' : file.name;
+          _pickedBytes = bytes;
+        });
+      });
+
   Future<void> _submit() => _run(() async {
         if (_body.text.trim().isEmpty)
           throw const NotetteException('Please enter your feedback.');
@@ -473,13 +503,14 @@ class _FeedbackFormState extends State<_FeedbackForm> {
                 }),
             anonymousOnly: true);
         var message = 'Feedback sent. Thank you!';
-        if (_attach &&
+        final image = _pickedBytes ?? (_attach ? widget.png : null);
+        if (image != null &&
             _config?['project']['screenshotsEnabled'] == true &&
-            widget.png != null &&
             result['uploadToken'] != null) {
           try {
             await widget.client.uploadScreenshot(result['item']['id'] as String,
-                result['uploadToken'] as String, widget.png!);
+                result['uploadToken'] as String, image,
+                contentType: _imageType(image) ?? 'image/png');
           } catch (_) {
             message =
                 'Feedback sent, but the screenshot could not be uploaded.';
@@ -856,6 +887,38 @@ class _FeedbackFormState extends State<_FeedbackForm> {
                                   child: Image.memory(widget.png!,
                                       height: 140, fit: BoxFit.contain)),
                           ],
+                          if (!thread &&
+                              widget.pickImage != null &&
+                              _config?['project']?['screenshotsEnabled'] ==
+                                  true)
+                            _pickedName == null
+                                ? Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: TextButton(
+                                        onPressed: _busy ? null : _pickImage,
+                                        child:
+                                            const Text('+ Attach screenshot')))
+                                : Row(children: [
+                                    const Icon(Icons.image_outlined,
+                                        size: 16, color: _muted),
+                                    const SizedBox(width: 6),
+                                    Expanded(
+                                        child: Text(_pickedName!,
+                                            overflow: TextOverflow.ellipsis,
+                                            style:
+                                                const TextStyle(fontSize: 12))),
+                                    IconButton(
+                                        tooltip: 'Remove screenshot',
+                                        iconSize: 16,
+                                        visualDensity: VisualDensity.compact,
+                                        onPressed: _busy
+                                            ? null
+                                            : () => setState(() {
+                                                  _pickedName = null;
+                                                  _pickedBytes = null;
+                                                }),
+                                        icon: const Icon(Icons.close)),
+                                  ]),
                         ] else if (thread && _detail != null)
                           const Text('Replies are disabled for this project.',
                               style: TextStyle(color: _muted)),
@@ -915,4 +978,27 @@ class _FeedbackFormState extends State<_FeedbackForm> {
                                 : 'Send')),
             ]));
   }
+}
+
+String _fileSize(int bytes) {
+  if (bytes < 1024 * 1024) return '${math.max(1, bytes ~/ 1024)} KB';
+  final mb = bytes / (1024 * 1024);
+  return '${mb == mb.roundToDouble() ? mb.round() : mb.toStringAsFixed(1)} MB';
+}
+
+/// Upload MIME type from magic bytes; null for formats the server rejects.
+String? _imageType(Uint8List bytes) {
+  bool starts(List<int> sig, [int at = 0]) {
+    if (bytes.length < at + sig.length) return false;
+    for (var i = 0; i < sig.length; i++) {
+      if (bytes[at + i] != sig[i]) return false;
+    }
+    return true;
+  }
+
+  if (starts([0x89, 0x50, 0x4e, 0x47])) return 'image/png';
+  if (starts([0xff, 0xd8, 0xff])) return 'image/jpeg';
+  if (starts([0x52, 0x49, 0x46, 0x46]) && starts([0x57, 0x45, 0x42, 0x50], 8))
+    return 'image/webp';
+  return null;
 }

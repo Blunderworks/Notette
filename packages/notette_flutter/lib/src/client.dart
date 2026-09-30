@@ -278,13 +278,13 @@ class NotetteClient {
   Future<Map<String, dynamic>> createFeedback(Map<String, dynamic> payload) =>
       _request('/feedback', method: 'POST', body: payload);
 
-  Future<void> uploadScreenshot(
-      String id, String uploadToken, Uint8List png) async {
+  Future<void> uploadScreenshot(String id, String uploadToken, Uint8List png,
+      {String contentType = 'image/png'}) async {
     await _request('/feedback/${Uri.encodeComponent(id)}/screenshot',
         method: 'PUT',
         bytes: png,
         headers: {
-          'Content-Type': 'image/png',
+          'Content-Type': contentType,
           'X-Notette-Upload-Token': uploadToken
         });
   }

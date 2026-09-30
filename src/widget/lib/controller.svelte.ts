@@ -81,6 +81,11 @@ interface FeedbackInput {
 	mentions?: MentionRef[];
 }
 
+interface DialogFeedbackInput extends Omit<FeedbackInput, 'screenshot'> {
+	/** Image the user chose to attach; uploaded only when the project allows screenshots. */
+	attachment: File | null;
+}
+
 const FOCUS_SESSION_KEY = 'notette:focus';
 /** Identity tokens this close to `exp` are refreshed before use. */
 const TOKEN_REFRESH_MARGIN_MS = 30_000;
@@ -605,7 +610,7 @@ export class WidgetController {
 	// ---------------------------------------------------------------------
 
 	/** Author, bot-protection and mention fields shared by both feedback entry points. */
-	private authorPayload(input: FeedbackInput): Pick<FeedbackCreatePayload, 'body' | 'author' | 'turnstileToken' | 'mentions'> {
+	private authorPayload(input: Omit<FeedbackInput, 'screenshot'>): Pick<FeedbackCreatePayload, 'body' | 'author' | 'turnstileToken' | 'mentions'> {
 		return {
 			body: input.body.trim(),
 			// Signed-in users and verified app users post under their identity; the server ignores author for them.
@@ -666,8 +671,8 @@ export class WidgetController {
 		return this.sendFeedback(payload, wantScreenshot, shot, () => (this.ui.composer = null));
 	}
 
-	/** Sends the dialog's feedback: page context only, optionally with a screenshot taken now. */
-	async submitDialogFeedback(input: FeedbackInput): Promise<FeedbackDetailDto> {
+	/** Sends the dialog's feedback: page context only, optionally with a user-chosen image. */
+	async submitDialogFeedback(input: DialogFeedbackInput): Promise<FeedbackDetailDto> {
 		const request = this.ui.feedbackDialog ?? {};
 		const view = currentViewport();
 		const metadata = { ...this.config.metadata, ...request.metadata };
@@ -687,9 +692,8 @@ export class WidgetController {
 			metadata: Object.keys(metadata).length ? metadata : undefined
 		};
 		if (!this.hasAuthor) this.rememberAuthor(input.author);
-		// The dialog lives in the excluded widget host, so the page is captured as the user sees it.
-		const wantScreenshot = input.screenshot && !!this.ui.project?.screenshotsEnabled;
-		const shot = wantScreenshot ? await captureViewport({ exclude: this.host, viewport: view }) : null;
+		const wantScreenshot = !!input.attachment && !!this.ui.project?.screenshotsEnabled;
+		const shot = wantScreenshot ? await attachedImage(input.attachment!) : null;
 		return this.sendFeedback(payload, wantScreenshot, shot, () => (this.ui.feedbackDialog = null));
 	}
 
@@ -1167,5 +1171,17 @@ export class WidgetController {
 		this.toastTimer = setTimeout(() => {
 			this.ui.toast = null;
 		}, 3500);
+	}
+}
+
+/** Wraps a chosen image file for upload; dimensions are best effort (the server sniffs the format). */
+async function attachedImage(file: File): Promise<Screenshot> {
+	try {
+		const bitmap = await createImageBitmap(file);
+		const size = { width: bitmap.width, height: bitmap.height };
+		bitmap.close();
+		return { blob: file, ...size };
+	} catch {
+		return { blob: file, width: 0, height: 0 };
 	}
 }

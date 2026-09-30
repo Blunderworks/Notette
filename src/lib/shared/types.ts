@@ -178,6 +178,8 @@ export interface WidgetConfigDto {
 		publicFeedbackVisible: boolean;
 		reviewerRepliesEnabled: boolean;
 		screenshotsEnabled: boolean;
+		/** Largest screenshot upload the server accepts, in bytes. */
+		maxScreenshotBytes: number;
 		/** False means the widget requires a signed-in user before it can be used. */
 		anonymousFeedbackAllowed: boolean;
 		/** True means anyone can create an account from the widget and join the project. */
