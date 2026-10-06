@@ -193,7 +193,7 @@ void main() {
     controller.refresh();
     await tester.pumpAndSettle();
     await click(tester, find.text('List'));
-    expect(find.text('All pages'), findsNothing);
+    expect(find.text('This page'), findsOneWidget);
     await click(tester, find.text(item()['body'] as String));
     expect(find.byType(TextField), findsNothing);
     expect(find.text('Resolve'), findsNothing);
@@ -218,6 +218,7 @@ void main() {
     expect(find.text('12'), findsOneWidget);
     expect(find.text('13'), findsNothing);
     await click(tester, find.text('List'));
+    await click(tester, find.text('Open'));
     await click(tester, find.text('Resolved').last);
     await click(tester, find.byTooltip('Close'));
     expect(find.text('12'), findsNothing);
@@ -230,6 +231,45 @@ void main() {
     await mount(tester, api);
     expect(find.text('12'), findsNothing);
     expect(find.text('13'), findsOneWidget);
+  });
+
+  testWidgets(
+      'reviewers browse all pages; selecting another screen navigates first',
+      (tester) async {
+    var path = '/home';
+    final scopes = <String?>[];
+    final navigated = <String>[];
+    final api = helpers.client(MockClient((r) async {
+      if (r.url.path.endsWith('/config'))
+        return helpers.json(configuration(admin: false));
+      if (r.url.path.endsWith('/feedback')) {
+        scopes.add(r.url.queryParameters['scope']);
+        return helpers.json({
+          'items': r.url.queryParameters['scope'] == 'project'
+              ? [item(), item(id: 'other', path: '/settings')]
+              : [item()]
+        });
+      }
+      return helpers.json(item(id: 'other', path: '/settings'));
+    }));
+    await mount(tester, api,
+        path: () => path,
+        navigate: (target) async {
+          navigated.add(target);
+          path = target;
+        });
+    await click(tester, find.text('List'));
+    expect(find.text('/settings'), findsNothing);
+    await click(tester, find.text('This page'));
+    await click(tester, find.text('All pages').last);
+    expect(scopes.last, 'project');
+    expect(find.text('/settings'), findsOneWidget);
+    await click(tester, find.text('/settings'));
+    expect(navigated, ['/settings']);
+    expect(find.text('Agreed, we can make this clearer.'), findsOneWidget);
+    await click(tester, find.byTooltip('Close'));
+    await click(tester, find.text('List'));
+    expect(find.text('All pages'), findsOneWidget);
   });
 
   testWidgets('signup verification resend and account notification setting',

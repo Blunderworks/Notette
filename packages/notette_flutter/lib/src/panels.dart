@@ -187,6 +187,55 @@ class _Field extends StatelessWidget {
       ]));
 }
 
+/// Compact web-style select. MenuAnchor uses the nearest Overlay, so it works
+/// above the host Navigator (DropdownButton would push a route).
+class _Select<T> extends StatelessWidget {
+  const _Select(
+      {required this.label,
+      required this.value,
+      required this.options,
+      required this.onChanged});
+  final String label;
+  final T value;
+  final Map<T, String> options;
+  final ValueChanged<T> onChanged;
+  @override
+  Widget build(BuildContext context) => MenuAnchor(
+      style: const MenuStyle(
+          backgroundColor: WidgetStatePropertyAll(Colors.white),
+          surfaceTintColor: WidgetStatePropertyAll(Colors.transparent)),
+      menuChildren: [
+        for (final entry in options.entries)
+          MenuItemButton(
+              onPressed: () => onChanged(entry.key),
+              trailingIcon: entry.key == value
+                  ? const Icon(Icons.check, size: 16, color: _accent)
+                  : null,
+              child: Text(entry.value, style: const TextStyle(fontSize: 12.5)))
+      ],
+      builder: (context, controller, _) => Semantics(
+          button: true,
+          label: label,
+          value: options[value],
+          excludeSemantics: true,
+          child: InkWell(
+              borderRadius: BorderRadius.circular(6),
+              onTap: () =>
+                  controller.isOpen ? controller.close() : controller.open(),
+              child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                  decoration: BoxDecoration(
+                      color: const Color(0xfff4f5f8),
+                      border: Border.all(color: _border),
+                      borderRadius: BorderRadius.circular(6)),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Text(options[value] ?? '$value',
+                        style: const TextStyle(fontSize: 12)),
+                    const Icon(Icons.expand_more, size: 16, color: _muted)
+                  ])))));
+}
+
 class _BrowsePanel extends StatefulWidget {
   const _BrowsePanel(
       {super.key,
@@ -194,13 +243,20 @@ class _BrowsePanel extends StatefulWidget {
       required this.path,
       required this.config,
       required this.status,
+      required this.project,
       required this.onStatus,
+      required this.onProject,
       required this.onSelect,
       required this.onClose});
   final NotetteClient client;
   final String path, status;
+
+  /// List every page of the project instead of the current one.
+  final bool project;
   final Map<String, dynamic> config;
-  final ValueChanged<String> onStatus, onSelect;
+  final ValueChanged<String> onStatus;
+  final ValueChanged<bool> onProject;
+  final ValueChanged<Map<String, dynamic>> onSelect;
   final VoidCallback onClose;
   @override
   State<_BrowsePanel> createState() => _BrowsePanelState();
@@ -215,12 +271,11 @@ class _BrowsePanelState extends State<_BrowsePanel> {
   List<Map<String, dynamic>> _items = [];
   int _generation = 0;
   Timer? _debounce;
-  bool get _admin => widget.config['viewer']?['admin'] == true;
   @override
   void initState() {
     super.initState();
     _status = widget.status;
-    _project = _admin;
+    _project = widget.project;
     _load();
   }
 
@@ -266,37 +321,30 @@ class _BrowsePanelState extends State<_BrowsePanel> {
         onClose: widget.onClose,
         child:
             Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          if (_admin)
-            Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: SegmentedButton<bool>(
-                    segments: const [
-                      ButtonSegment(value: true, label: Text('All pages')),
-                      ButtonSegment(value: false, label: Text('This page'))
-                    ],
-                    selected: {
-                      _project
-                    },
-                    onSelectionChanged: (v) {
-                      setState(() => _project = v.first);
-                      _load();
-                    })),
           Row(children: [
-            Expanded(
-                child: SegmentedButton<String>(
-              segments: const [
-                ButtonSegment(value: 'open', label: Text('Open')),
-                ButtonSegment(value: 'resolved', label: Text('Resolved')),
-                ButtonSegment(value: 'all', label: Text('All'))
-              ],
-              selected: {_status},
-              onSelectionChanged: (values) {
-                final value = values.first;
-                setState(() => _status = value);
-                widget.onStatus(value);
-                _load();
-              },
-            )),
+            _Select<bool>(
+                label: 'Pages',
+                value: _project,
+                options: const {false: 'This page', true: 'All pages'},
+                onChanged: (value) {
+                  setState(() => _project = value);
+                  widget.onProject(value);
+                  _load();
+                }),
+            const Spacer(),
+            _Select<String>(
+                label: 'Status',
+                value: _status,
+                options: const {
+                  'open': 'Open',
+                  'resolved': 'Resolved',
+                  'all': 'All'
+                },
+                onChanged: (value) {
+                  setState(() => _status = value);
+                  widget.onStatus(value);
+                  _load();
+                }),
             IconButton(
                 tooltip: 'Refresh feedback',
                 onPressed: _load,
@@ -330,7 +378,7 @@ class _BrowsePanelState extends State<_BrowsePanel> {
                   borderRadius: BorderRadius.circular(6),
                   child: InkWell(
                       borderRadius: BorderRadius.circular(6),
-                      onTap: () => widget.onSelect(item['id'] as String),
+                      onTap: () => widget.onSelect(item),
                       child: Padding(
                           padding: const EdgeInsets.all(12),
                           child: Row(

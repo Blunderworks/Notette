@@ -18,6 +18,9 @@ import { computeSelector, computeXPath, describeElement, elementLabel, pageRect,
 import { captureViewport, currentViewport, type CaptureViewport, type Screenshot } from './screenshot';
 import { readLocal, readSession, writeLocal, writeSession } from './storage';
 
+/** Feedback list scope: the current page or every page of the project. */
+export type ListScope = 'page' | 'project';
+
 export interface ConfirmOptions {
 	title: string;
 	message?: string;
@@ -164,6 +167,8 @@ export class WidgetController {
 		pinsVisible: true,
 		/** Status filter shared by the list and the pins; persisted per project. */
 		statusFilter: 'open' as FeedbackStatus | 'all',
+		/** List scope chosen by the viewer; null until chosen (admins default to all pages). Persisted per project. */
+		listScope: null as ListScope | null,
 		panelOpen: false,
 		composer: null as ComposerTarget | null,
 		selectedId: null as string | null,
@@ -202,6 +207,8 @@ export class WidgetController {
 		this.ui.pinsVisible = readLocal<boolean>(this.storageKey('pins'), true);
 		const storedStatus = readLocal<string>(this.storageKey('status'), 'open');
 		if (storedStatus === 'open' || storedStatus === 'resolved' || storedStatus === 'all') this.ui.statusFilter = storedStatus;
+		const storedScope = readLocal<string | null>(this.storageKey('scope'), null);
+		if (storedScope === 'page' || storedScope === 'project') this.ui.listScope = storedScope;
 		this.ui.expanded = config.open;
 	}
 
@@ -300,7 +307,8 @@ export class WidgetController {
 			this.ui.selectedId = null;
 			this.ui.detail = null;
 			this.ui.composer = null;
-			void this.loadPageItems();
+			// A navigate() handler leaves the item to open in pendingFocusId until the new page loads.
+			void this.loadPageItems().then(() => this.applyPendingFocus());
 		}
 		this.ui.layoutTick += 1;
 	};
@@ -488,6 +496,11 @@ export class WidgetController {
 	setStatusFilter(status: FeedbackStatus | 'all'): void {
 		this.ui.statusFilter = status;
 		writeLocal(this.storageKey('status'), status);
+	}
+
+	setListScope(scope: ListScope): void {
+		this.ui.listScope = scope;
+		writeLocal(this.storageKey('scope'), scope);
 	}
 
 	/** Page items that pass the status filter; the open thread's item always stays visible. */
@@ -871,7 +884,7 @@ export class WidgetController {
 			return;
 		}
 		if (item.path !== this.ui.currentPath) {
-			this.navigateTo(item);
+			await this.navigateTo(item);
 			return;
 		}
 		this.ui.expanded = true;
@@ -890,8 +903,7 @@ export class WidgetController {
 		await this.openThread(id);
 	}
 
-	private navigateTo(item: FeedbackSummaryDto): void {
-		writeSession(FOCUS_SESSION_KEY, item.id);
+	private async navigateTo(item: FeedbackSummaryDto): Promise<void> {
 		let target: string;
 		try {
 			const url = new URL(item.url);
@@ -899,6 +911,21 @@ export class WidgetController {
 		} catch {
 			target = item.path;
 		}
+		const navigate = this.config.navigate;
+		if (navigate) {
+			this.pendingFocusId = item.id;
+			this.ui.panelOpen = false;
+			try {
+				await navigate(target);
+				// Routers that already changed the path get their thread now; others when the path changes.
+				this.onLocationMaybeChanged();
+				return;
+			} catch (err) {
+				console.error('[notette] navigate() failed; loading the page instead', err);
+				this.pendingFocusId = null;
+			}
+		}
+		writeSession(FOCUS_SESSION_KEY, item.id);
 		location.assign(target);
 	}
 

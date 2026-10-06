@@ -23,12 +23,10 @@ export const GET = api(async (event) => {
 		return json({ items: [], total: 0 } satisfies FeedbackListDto);
 	}
 
+	// Project scope lists the same items page scope returns for any path, so reviewers may use it too.
 	const params = event.url.searchParams;
 	const scope = params.get('scope') === 'project' ? 'project' : 'page';
 	const path = params.get('path');
-	if (scope === 'project' && !admin) {
-		throw new ApiError(403, 'Browsing the whole project requires admin access', 'forbidden');
-	}
 	if (scope === 'page' && (path === null || path.length > 2048)) {
 		throw new ApiError(400, 'A path is required', 'bad_request');
 	}

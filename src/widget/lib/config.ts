@@ -30,7 +30,15 @@ export interface NotetteInitOptions {
 	open?: boolean;
 	/** Show the floating feedback button (default true). Without it, use Notette.feedback() or Notette.open(). */
 	launcher?: boolean;
+	/**
+	 * Opens another page of your app when a reviewer selects feedback left there,
+	 * e.g. with your SPA router. Defaults to a full page load (`location.assign`).
+	 */
+	navigate?: NavigateHandler;
 }
+
+/** Receives the same-origin URL of the page to open; the widget opens the thread once the path changes. */
+export type NavigateHandler = (url: string) => unknown;
 
 export interface ResolvedConfig {
 	key: string;
@@ -44,6 +52,7 @@ export interface ResolvedConfig {
 	position: WidgetPosition;
 	open: boolean;
 	launcher: boolean;
+	navigate: NavigateHandler | null;
 }
 
 export interface ScriptConfig extends Partial<NotetteInitOptions> {
@@ -121,6 +130,7 @@ export function resolveConfig(
 		identityManaged: !!options && 'userToken' in options,
 		position: options?.position ?? script.position ?? 'bottom-right',
 		open: options?.open ?? script.open ?? false,
-		launcher: options?.launcher ?? script.launcher ?? true
+		launcher: options?.launcher ?? script.launcher ?? true,
+		navigate: typeof options?.navigate === 'function' ? options.navigate : null
 	};
 }

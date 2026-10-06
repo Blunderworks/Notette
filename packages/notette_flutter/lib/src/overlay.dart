@@ -88,6 +88,9 @@ class _NotetteFeedbackState extends State<NotetteFeedback> {
   bool _activating = false;
   bool _pinsVisible = true;
   String _status = 'open';
+
+  /// List scope once chosen; until then admins default to all pages.
+  bool? _projectScope;
   String _path = '';
   String? _error;
   Map<String, dynamic>? _config;
@@ -197,6 +200,7 @@ class _NotetteFeedbackState extends State<NotetteFeedback> {
         if (!['open', 'resolved', 'all'].contains(_status)) _status = 'open';
         _pinsVisible =
             prefs.getBool('${widget.client.storageKey}:pins') ?? true;
+        _projectScope = prefs.getBool('${widget.client.storageKey}:scope');
       } catch (_) {}
       if (!mounted) return;
       _ready = true;
@@ -261,6 +265,30 @@ class _NotetteFeedbackState extends State<NotetteFeedback> {
     } catch (_) {}
   }
 
+  Future<void> _setProjectScope(bool value) async {
+    _projectScope = value;
+    try {
+      await (await SharedPreferences.getInstance())
+          .setBool('${widget.client.storageKey}:scope', value);
+    } catch (_) {}
+  }
+
+  /// Opens a listed item, first moving to its screen through onNavigate.
+  Future<void> _select(Map<String, dynamic> item) async {
+    final path = item['path'];
+    final navigate = widget.onNavigate;
+    if (navigate != null && path is String && path != _path) {
+      setState(() => _dialog = null);
+      try {
+        await navigate(path);
+      } catch (e) {
+        if (mounted) setState(() => _error = '$e');
+      }
+      if (!mounted) return;
+    }
+    await _focus(item['id'] as String);
+  }
+
   void _togglePins() {
     setState(() => _pinsVisible = !_pinsVisible);
     () async {
@@ -281,8 +309,10 @@ class _NotetteFeedbackState extends State<NotetteFeedback> {
         path: _path,
         config: _config!,
         status: _status,
+        project: _projectScope ?? _admin,
         onStatus: _setStatusFilter,
-        onSelect: _focus,
+        onProject: _setProjectScope,
+        onSelect: _select,
         onClose: _closeDialog,
       );
     });

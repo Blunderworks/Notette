@@ -3,25 +3,21 @@
 	import type { FeedbackStatus, FeedbackSummaryDto } from '$lib/shared/types';
 	import { timeAgo } from '$lib/format';
 	import { NotetteApiError } from '../lib/api';
-	import type { WidgetController } from '../lib/controller.svelte';
+	import type { ListScope, WidgetController } from '../lib/controller.svelte';
 	import Icon from './Icon.svelte';
 
 	const c = getContext<WidgetController>('notette');
 	const ui = c.ui;
 
-	let scope = $state<'page' | 'project'>(c.isAdmin ? 'project' : 'page');
+	const scope = $derived<ListScope>(ui.listScope ?? (c.isAdmin ? 'project' : 'page'));
 	let q = $state('');
 	let projectItems = $state<FeedbackSummaryDto[]>([]);
 	let loading = $state(false);
 	let error = $state<string | null>(null);
 
+	// Load project-wide items, debounced on filter changes.
 	$effect(() => {
-		if (!c.isAdmin && scope === 'project') scope = 'page';
-	});
-
-	// Load project-wide items (admin only), debounced on filter changes.
-	$effect(() => {
-		if (scope !== 'project' || !c.isAdmin) return;
+		if (scope !== 'project' || !c.canSeeFeedback) return;
 		const currentStatus = ui.statusFilter;
 		const currentQ = q.trim();
 		let cancelled = false;
@@ -78,14 +74,17 @@
 	</div>
 
 	<div class="filters">
-		{#if c.isAdmin}
-			<div class="segment" role="tablist">
-				<button type="button" role="tab" class:active={scope === 'project'} aria-selected={scope === 'project'} onclick={() => (scope = 'project')}>All pages</button>
-				<button type="button" role="tab" class:active={scope === 'page'} aria-selected={scope === 'page'} onclick={() => (scope = 'page')}>This page</button>
-			</div>
-		{/if}
 		<select
 			class="nt-select"
+			value={scope}
+			onchange={(e) => c.setListScope(e.currentTarget.value as ListScope)}
+			aria-label="Pages"
+		>
+			<option value="page">This page</option>
+			<option value="project">All pages</option>
+		</select>
+		<select
+			class="nt-select status"
 			value={ui.statusFilter}
 			onchange={(e) => c.setStatusFilter(e.currentTarget.value as FeedbackStatus | 'all')}
 			aria-label="Status"
@@ -107,7 +106,7 @@
 			<div class="empty nt-faint">Loading…</div>
 		{:else if items.length === 0}
 			<div class="empty nt-faint">
-				{#if scope === 'page' && !c.isAdmin && q === '' && ui.statusFilter === 'open'}
+				{#if scope === 'page' && q === '' && ui.statusFilter === 'open'}
 					No open feedback on this page yet.
 				{:else}
 					Nothing matches.
@@ -179,29 +178,11 @@
 	}
 	.filters .nt-select {
 		width: auto;
-		margin-left: auto;
 		padding: 4px 8px;
 		font-size: 12px;
 	}
-	.segment {
-		display: inline-flex;
-		padding: 2px;
-		border-radius: var(--nt-radius-sm);
-		background: var(--nt-bg-2);
-	}
-	.segment button {
-		padding: 3px 9px;
-		border: none;
-		border-radius: 4px;
-		background: transparent;
-		color: var(--nt-text-2);
-		font-size: 12px;
-		font-weight: 500;
-	}
-	.segment button.active {
-		background: var(--nt-bg);
-		color: var(--nt-text);
-		box-shadow: var(--nt-shadow-sm);
+	.filters .status {
+		margin-left: auto;
 	}
 	.search {
 		position: relative;

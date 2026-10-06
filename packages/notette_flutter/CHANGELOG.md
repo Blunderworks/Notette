@@ -1,5 +1,6 @@
 ## Unreleased
 
+- Add a **This page** / **All pages** list dropdown for every viewer who can see feedback; selecting another screen's item calls `onNavigate` before opening its thread. The status filter is now a dropdown.
 - Add `showNotetteFeedbackDialog()`: a standalone feedback dialog, e.g. for a settings screen, that works without the overlay. Users can attach a PNG, JPEG or WebP image with **+ Attach screenshot** (adds `image_picker`).
 - Add `NotetteClient.userTokenProvider` for projects with identity verification: host-signed tokens attribute feedback to the app's user, replace Notette sign-in, and refresh once when rejected. Add `identityError` and `resetIdentity()`.
 

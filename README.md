@@ -168,7 +168,7 @@ Choose **Comment**, select an element and leave feedback. Feedback includes the 
 
 Sign in with a Notette account or approve access through the dashboard. Only approve a request you just started yourself; never one from a link someone sent you. Projects can require sign-in and offer signup/verification. You stay signed in on that site until you sign out or the session expires. The avatar menu offers sign-out and notification preferences.
 
-Admins can resolve, reopen, delete and use **List → All pages** to browse feedback. Signed-in users can type `@` to mention people with project access; admins can also mention other admins/owners. **Copy for Agent** copies feedback and context as Markdown from the thread or dashboard. Link directly to an item with `?notette=<feedback id>`.
+**List** shows feedback on **This page** or, with the left-hand dropdown, on **All pages**: everything the viewer could see page by page, in one list. Selecting an item from another page opens that page, then its thread. Admins can also resolve, reopen and delete. Signed-in users can type `@` to mention people with project access; admins can also mention other admins/owners. **Copy for Agent** copies feedback and context as Markdown from the thread or dashboard. Link directly to an item with `?notette=<feedback id>`.
 
 Optional script attributes: `data-environment`, `data-branch`, `data-commit`, `data-deployment-url`, `data-position="bottom-left"`, `data-open="true"`, `data-host` (API URL override), and `data-auto-init="false"`.
 
@@ -199,7 +199,16 @@ For programmatic setup:
 </script>
 ```
 
-`user` prefills anonymous identity; it does not authenticate (use `userToken` below for that). Expose build metadata to the client as needed (for example Vercel's `VERCEL_ENV`, `VERCEL_GIT_COMMIT_REF`, `VERCEL_GIT_COMMIT_SHA` and `VERCEL_URL`). `window.Notette` also provides `open()`, `close()`, `comment()`, `list()`, `focus(id)`, `feedback()`, `identify()` and `destroy()`.
+`user` prefills anonymous identity; it does not authenticate (use `userToken` below for that). Expose build metadata to the client as needed (for example Vercel's `VERCEL_ENV`, `VERCEL_GIT_COMMIT_REF`, `VERCEL_GIT_COMMIT_SHA` and `VERCEL_URL`). Opening another page is a full page load by default. Single-page apps can pass `navigate` to use their router instead; the widget opens the thread once the address changes:
+
+```js
+Notette.init({
+  key: "ntk_yourkey",
+  navigate: (url) => router.push(new URL(url).pathname),
+});
+```
+
+`window.Notette` also provides `open()`, `close()`, `comment()`, `list()`, `focus(id)`, `feedback()`, `identify()` and `destroy()`.
 
 #### Feedback button and signed-in users
 

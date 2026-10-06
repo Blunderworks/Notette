@@ -134,7 +134,7 @@ Apps supplying their own Notette session can set `client.token` to a per-user **
 ## Available features
 
 - **Toolbar:** Comment, show/hide numbered pins, list, account and collapse. The collapsed circular launcher uses the same comment icon as the web widget and remains draggable. A signed-out tap opens sign-in, including on public projects. `position: Alignment.bottomLeft` changes the default corner; `initiallyOpen: true` starts expanded.
-- **Browse:** current-screen feedback, shared Open/Resolved/All filters, search and refresh. Admins can browse all pages. Pin visibility and status filters are remembered per server/project/origin.
+- **Browse:** **This page** / **All pages** and Open/Resolved/All dropdowns, search and refresh. Anyone who can see feedback can list all pages. Pin visibility, list scope and status filters are remembered per server/project/origin.
 - **Threads:** author roles, relative timestamps, highlighted mentions, replies, authenticated screenshot previews with zoom, copy-for-agent Markdown, and admin dashboard links. Admins can resolve/reopen and delete with confirmation. Visibility and reply permissions follow the project settings; signed-in members do not gain admin privileges.
 - **Compose and reply:** tinted fields with labels above them, remembered anonymous identity, `@` mention suggestions for signed-in users, screenshot opt-out, Ctrl/Cmd+Enter to send, Escape to close. `user: {'name': '...', 'email': '...'}` pre-fills anonymous identity without authenticating it. `deployment` supplies environment/branch/commit/URL context alongside `metadata`.
 - **Account:** signup, email verification/resend, dashboard approval with cancel/denied/expired states, sign-out, and project email notification preferences when email is configured.
@@ -143,7 +143,17 @@ The sign-in card follows the web layout and uses tinted placeholder fields; plac
 
 ### Native routing and targeting
 
-Route changes refresh page pins automatically. Supply `onNavigate: (path) async { ... }` to connect **Go to screen** to your router. `initialFeedbackId` opens a specific thread (waiting for required sign-in); Flutter web also accepts the `notette` URL query parameter. `openUrl` can override the system browser for approval and dashboard links.
+Route changes refresh page pins automatically. Supply `onNavigate: (path) async { ... }` to connect your router: selecting an **All pages** item from another screen calls it before opening the thread, and threads show **Go to screen**. Without it, the thread opens over the current screen. `path` is the root-relative route recorded with the feedback (the `screenPath` value when it was left), so map it back to a route:
+
+```dart
+NotetteFeedback(
+  client: feedbackClient,
+  screenPath: () => router.state.uri.toString(),
+  onNavigate: (path) async => router.go(path),
+  child: child!,
+)
+```
+ `initialFeedbackId` opens a specific thread (waiting for required sign-in); Flutter web also accepts the `notette` URL query parameter. `openUrl` can override the system browser for approval and dashboard links.
 
 Native pins use logical screen coordinates scaled to the current viewport. Flutter does not expose web DOM selectors, XPath, or automatic element/scroll anchoring. For changing native layouts, `resolvePin: (item, viewport) => ...` can return an application's current anchor position for an item; returning null uses the coordinate fallback. Pin capture records the screen, not private input values or a synthesized DOM tree.
 
