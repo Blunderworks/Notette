@@ -1,7 +1,10 @@
 # syntax=docker/dockerfile:1
 
 # ---- base -------------------------------------------------------------------
-FROM node:22-alpine AS base
+# Node work (install, build) runs on the build machine's platform: the output and
+# all production dependencies are plain JavaScript, and Node under QEMU emulation
+# crashes multi-arch builds. Only the runtime stage uses the target platform.
+FROM --platform=$BUILDPLATFORM node:22-alpine AS base
 WORKDIR /app
 ENV NODE_ENV=production
 # pnpm version comes from the "packageManager" field in package.json.
@@ -23,7 +26,9 @@ COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile --prod --ignore-scripts
 
 # ---- runtime ----------------------------------------------------------------
-FROM base AS runtime
+FROM node:22-alpine AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
 RUN apk add --no-cache tini su-exec
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/build ./build

@@ -132,5 +132,5 @@ Base: `src/lib/server/`.
 
 ## Container boundaries
 
-- `Dockerfile`: separate widget/server build and production deps; adapter-node output, tini, persistent uploads. `/app` stays root-owned; runtime user writes only `/data`.
+- `Dockerfile`: separate widget/server build and production deps; adapter-node output, tini, persistent uploads. Node stages run on `$BUILDPLATFORM` (Node under QEMU crashes arm64 release builds); only `runtime` is target-platform, so production deps must stay pure JS (a native module needs a target-platform install stage). `/app` stays root-owned; runtime user writes only `/data`.
 - `docker-entrypoint.sh`: derives ORIGIN from NOTETTE_URL; root fixes upload ownership then drops to node. Explicit --user skips ownership repair.
